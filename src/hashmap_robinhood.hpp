@@ -1,11 +1,17 @@
-#include "hashmap.hpp"
+#include "../include/hashmap.hpp"
+
+#include <functional>
+#include <utility>
+#include <algorithm>
+#include <iterator>
+#include <cstddef>
 
 template<typename Key, typename Value>
 class HashMapRobinhood : public HashMap<Key, Value> {
 private:
     struct Node {
         Key key;
-        std::vector<Value> values;
+        Value value;
         unsigned int PSL;
     };
     size_t capacity;
@@ -28,17 +34,14 @@ private:
         std::vector<std::optional<Node>> old_buckets = std::move(buckets);
         size_t old_capacity = capacity;
 
-        capacity <<= 2;
+        capacity <<= 1;
         max_PSL = 0;
         buckets.assign(capacity, std::nullopt);
         _size = 0;
 
         for (std::size_t i = 0; i < old_capacity; i++) {
             if (old_buckets[i].has_value()) {
-                Key k = old_buckets[i]->key;
-                for (const Value& val : old_buckets[i]->values) {
-                    insert(k, val);
-                }
+                insert(old_buckets[i]->key, old_buckets[i]->value);
             }
         }
     }
@@ -47,10 +50,14 @@ private:
         size_t index = hasher(key) & mask();
         unsigned int PSL = 0;
 
-        while (PSL <= maxPSL) {
+        while (PSL <= max_PSL) {
             size_t i = (index + PSL) & mask();
-            if (buckets[i].has_value() && buckets[i]->key == key) {
-                buckets[i]->values.push_back(value);
+            if (!buckets[i].has_value()) {
+                return false;
+            }
+            if (buckets[i]->key == key) {
+                std::copy(std::begin(value), std::end(value),
+                    std::back_inserter(buckets[i]->value));
                 return true;
             }
 
@@ -61,8 +68,61 @@ private:
     }
 
 public:
+    class iterator {
+        friend class HashMapRobinhood;
+        HashMapRobinhood* map;
+        size_t index;
+
+        void advance_to_valid() {
+            while (map && index < map->capacity && !map->buckets[index].has_value()) index++;
+        }
+
+        iterator(HashMapRobinhood* m, size_t start)
+            : map(m),
+            index(start) {
+            advance_to_valid();
+        }
+
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = std::pair<const Key, Value>;
+        using difference_type = std::ptrdiff_t;
+        using pointer = void;
+        using reference = value_type;
+
+        iterator()
+            : map(nullptr),
+            index(0) {
+        }
+
+        reference operator*() const {
+            const Node& node = *map->buckets[index];
+            return reference(node.key, node.value);
+        }
+
+        iterator& operator++() {
+            index++;
+            advance_to_valid();
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator temp = *this;
+            (*this)++;
+            return temp;
+        }
+
+        bool operator==(const iterator& other) const {
+            return map == other.map && index == other.index;
+        }
+
+        bool operator!=(const iterator& other) const {
+            return !(*this == other);
+        }
+    };
+
     HashMapRobinhood(size_t initial_capacity = 16)
-        : capacity(next_power_of_two(original_capacity)),
+        : capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),
         buckets(capacity),
         _size(0),
         max_PSL(0) {
@@ -78,7 +138,7 @@ public:
         return _size == 0;
     }
 
-    bool insert(const Key& key, const Value& value) override {
+    bool emplace(const Key& key, const Value& value) override {
         if (update_key_values(key, value)) {
             return true;
         }
@@ -90,46 +150,65 @@ public:
         size_t index = hasher(key) & mask();
         unsigned int PSL = 0;
 
+        Key cur_key = key;
+        Value cur_value = value;
+
         while (true) {
             size_t i = (index + PSL) & mask();
             if (!buckets[i].has_value()) {
-                buckets[i] = Node{ key, std::vector<Value>{value}, PSL };
+                buckets[i].emplace(Node{ std::move(cur_key), std::move(cur_value), PSL });
                 _size++;
-                max_PSL = PSL > maxPSL ? PSL : max_PSL;
+                max_PSL = (PSL > max_PSL ? PSL : max_PSL);
                 return true;
             }
             else if (PSL > buckets[i]->PSL) {
-                Key old_key = buckets[i]->key;
-                std::vector<Value> old_values = std::move(buckets[i]->values);
-                buckets[i].emplace(Node{ key, std::vector<Value>{value}, PSL });
-                max_PSL = PSL > maxPSL ? PSL : max_PSL;
-                for (const Value& old_value : old_values) {
-                    insert(old_key, old_value);
-                }
-                return true;
+                Node old_node = std::move(*buckets[i]);
+                buckets[i].emplace(Node{ std::move(cur_key), std::move(cur_value), PSL });
+                cur_key = std::move(old_node.key);
+                cur_value = std::move(old_node.value);
+                PSL = old_node.PSL;
+                max_PSL = (PSL > max_PSL ? PSL : max_PSL);
             }
-
-            PSL++;
+            else {
+                PSL++;
+            }
         }
 
         return false;
     }
 
-    std::optional<std::pair<Key, std::vector<Value>>> find(const Key& key, const Value& value) override {
+    std::optional<std::pair<Key, Value>> find(const Key& key) override {
+        auto iter = find_iterator(key);
+        if (iter == end()) {
+            return std::nullopt;
+        }
+        auto p = *iter;
+        return std::make_optional(std::make_pair(p.first, p.second));
+    }
+
+    iterator find_iterator(const Key& key) {
         size_t index = hasher(key) & mask();
         unsigned int PSL = 0;
 
         while (PSL <= max_PSL) {
             size_t i = (index + PSL) & mask();
-            if (buckets[i].has_value() && buckets[i]->key == key) {
-                return std::make_optional(std::make_pair(buckets[i]->key, buckets[i]->values));
+            if (!buckets[i].has_value()) {
+                return end();
             }
-
+            if (buckets[i]->key == key) {
+                return iterator(this, i);
+            }
             PSL++;
         }
 
-        return std::nullopt;
+        return end();
     }
 
+    iterator begin() {
+        return iterator(this, 0);
+    }
 
+    iterator end() {
+        return iterator(this, capacity);
+    }
 };

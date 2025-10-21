@@ -26,14 +26,15 @@ namespace Contest {
             if (build_left) {
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
-                        [&hash_table, idx = idx](const auto& key) {
+                        [hash_table, idx = idx](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                                auto result = hash_table->find(key);
+                                if (!result.has_value()) {
+                                    hash_table->emplace(key, std::vector<size_t>(1, idx));
                                 }
                                 else {
-                                    itr->second.push_back(idx);
+                                    result->second.push_back(idx);
                                 }
                             }
                             else if constexpr (not std::is_same_v<Tk, std::monostate>) {
@@ -47,8 +48,9 @@ namespace Contest {
                         [&](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                                    for (auto left_idx : itr->second) {
+                                auto result = hash_table->find(key);
+                                if (!result.has_value()) {
+                                    for (auto left_idx : result->second) {
                                         auto& left_record = left[left_idx];
                                         std::vector<Data> new_record;
                                         new_record.reserve(output_attrs.size());
@@ -75,14 +77,15 @@ namespace Contest {
             else {
                 for (auto&& [idx, record] : right | views::enumerate) {
                     std::visit(
-                        [&hash_table, idx = idx](const auto& key) {
+                        [hash_table, idx = idx](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                                auto result = hash_table->find(key);
+                                if (!result.has_value()) {
+                                    hash_table->emplace(key, std::vector<size_t>(1, idx));
                                 }
                                 else {
-                                    itr->second.push_back(idx);
+                                    result->second.push_back(idx);
                                 }
                             }
                             else if constexpr (not std::is_same_v<Tk, std::monostate>) {
@@ -96,8 +99,9 @@ namespace Contest {
                         [&](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                                    for (auto right_idx : itr->second) {
+                                auto result = hash_table->find(key);
+                                if (!result.has_value()) {
+                                    for (auto right_idx : result->second) {
                                         auto& right_record = right[right_idx];
                                         std::vector<Data> new_record;
                                         new_record.reserve(output_attrs.size());
@@ -121,7 +125,6 @@ namespace Contest {
                         left_record[left_col]);
                 }
             }
-
             delete hash_table;
         }
     };

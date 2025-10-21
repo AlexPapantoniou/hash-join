@@ -73,7 +73,7 @@ FetchContent_MakeAvailable(duckdb)
 
 # Include all sources from /src directory. CONFIGURE_DEPENDS can be unreliable.
 # Try re-running cmake in case changes are not recognized.
-file(GLOB HASHMAP_IMPL
+file(GLOB SIGMODPC_SRC
     CONFIGURE_DEPENDS
     "src/*.cpp"
     "include/hashmap.hpp"
@@ -89,8 +89,8 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc|ppc64|ppc64le")
 endif()
 
 # Targets
-add_executable(run ${SIGMODPC_SRC} ${HASHMAP_IMPL} tests/read_sql.cpp)
-add_executable(unit_tests ${SIGMODPC_SRC} ${HASHMAP_IMPL} tests/unit_tests.cpp)
+add_executable(run ${SIGMODPC_SRC} tests/read_sql.cpp)
+add_executable(unit_tests ${SIGMODPC_SRC} tests/unit_tests.cpp)
 add_executable(build_database tests/build_database.cpp)
 
 # For all executables
