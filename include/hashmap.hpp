@@ -10,5 +10,6 @@ public:
     virtual bool emplace(const Key& key, const Value& value) = 0;
     virtual std::optional<std::pair<Key, Value>> find(const Key& key) = 0;
     virtual size_t size() const = 0;
+    virtual size_t capacity() const = 0;
     virtual bool empty() const = 0;
 };

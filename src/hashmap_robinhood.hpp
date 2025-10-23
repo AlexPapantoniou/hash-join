@@ -14,14 +14,14 @@ private:
         Value value;
         unsigned int PSL;
     };
-    size_t capacity;
+    size_t _capacity;
     std::vector<std::optional<Node>> buckets;
     size_t _size;
     unsigned int max_PSL;
     std::hash<Key> hasher;
 
     inline size_t mask() {
-        return capacity - 1;
+        return _capacity - 1;
     }
 
     static size_t next_power_of_two(size_t n) {
@@ -32,11 +32,11 @@ private:
 
     void rehash() {
         std::vector<std::optional<Node>> old_buckets = std::move(buckets);
-        size_t old_capacity = capacity;
+        size_t old_capacity = _capacity;
 
-        capacity <<= 1;
+        _capacity <<= 1;
         max_PSL = 0;
-        buckets.assign(capacity, std::nullopt);
+        buckets.assign(_capacity, std::nullopt);
         _size = 0;
 
         for (std::size_t i = 0; i < old_capacity; i++) {
@@ -53,7 +53,7 @@ public:
         size_t index;
 
         void advance_to_valid() {
-            while (map && index < map->capacity && !map->buckets[index].has_value()) index++;
+            while (map && index < map->_capacity && !map->buckets[index].has_value()) index++;
         }
 
         iterator(HashMapRobinhood* m, size_t start)
@@ -101,8 +101,8 @@ public:
     };
 
     HashMapRobinhood(size_t initial_capacity = 16)
-        : capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),
-        buckets(capacity),
+        : _capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),
+        buckets(_capacity),
         _size(0),
         max_PSL(0) {
     }
@@ -113,12 +113,16 @@ public:
         return _size;
     }
 
+    size_t capacity() const override {
+        return _capacity;
+    }
+
     bool empty() const override {
         return _size == 0;
     }
 
     bool emplace(const Key& key, const Value& value) override {
-        if (_size >= capacity / 2) {
+        if (_size >= _capacity / 2) {
             rehash();
         }
 
@@ -184,6 +188,21 @@ public:
     }
 
     iterator end() {
-        return iterator(this, capacity);
+        return iterator(this, _capacity);
+    }
+
+    template<typename Index>
+    std::optional<std::pair<Key, Value>> operator[](Index index) const {
+        size_t i = static_cast<size_t>(index);
+        if (i >= _capacity) {
+            return std::nullopt;
+        }
+
+        if (buckets[i].has_value()) {
+            const Node& node = *buckets[i];
+            return std::make_pair(node.key, node.value);
+        }
+
+        return std::nullopt;
     }
 };
