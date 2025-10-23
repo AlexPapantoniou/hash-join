@@ -2,6 +2,11 @@
 #include <plan.h>
 #include <table.h>
 
+// TODO: REMOVE BEFORE SENDING
+// ---------------------------------------------
+#include <iostream>
+// ---------------------------------------------
+
 #include "hashmap_robinhood.hpp"
 
 namespace Contest {
@@ -24,6 +29,7 @@ namespace Contest {
             // std::unordered_map<T, std::vector<size_t>> hash_table;
             HashMap<T, std::vector<size_t>>* hash_table = new HashMapRobinhood<T, std::vector<size_t>>();
             if (build_left) {
+                // std::cout << "In build left if\n";
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
                         [hash_table, idx = idx](const auto& key) {
@@ -49,7 +55,7 @@ namespace Contest {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
                                 auto result = hash_table->find(key);
-                                if (!result.has_value()) {
+                                if (result.has_value()) {
                                     for (auto left_idx : result->second) {
                                         auto& left_record = left[left_idx];
                                         std::vector<Data> new_record;
@@ -75,6 +81,7 @@ namespace Contest {
                 }
             }
             else {
+                // std::cout << "In else\n";
                 for (auto&& [idx, record] : right | views::enumerate) {
                     std::visit(
                         [hash_table, idx = idx](const auto& key) {
@@ -82,10 +89,15 @@ namespace Contest {
                             if constexpr (std::is_same_v<Tk, T>) {
                                 auto result = hash_table->find(key);
                                 if (!result.has_value()) {
+                                    // std::cout << "Adding key " << key << std::endl;
                                     hash_table->emplace(key, std::vector<size_t>(1, idx));
+                                    // hash_table->print();
+                                    // std::cout << "Added key " << key << std::endl;
                                 }
                                 else {
+                                    // std::cout << "Adding value to " << key << std::endl;
                                     result->second.push_back(idx);
+                                    // std::cout << "Added value to " << key << std::endl;
                                 }
                             }
                             else if constexpr (not std::is_same_v<Tk, std::monostate>) {
@@ -100,7 +112,9 @@ namespace Contest {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
                                 auto result = hash_table->find(key);
-                                if (!result.has_value()) {
+                                // std::cout << "Found key " << key << std::endl;
+                                if (result.has_value()) {
+                                    // std::cout << "hi\n";
                                     for (auto right_idx : result->second) {
                                         auto& right_record = right[right_idx];
                                         std::vector<Data> new_record;

@@ -41,30 +41,9 @@ private:
 
         for (std::size_t i = 0; i < old_capacity; i++) {
             if (old_buckets[i].has_value()) {
-                insert(old_buckets[i]->key, old_buckets[i]->value);
+                emplace(old_buckets[i]->key, old_buckets[i]->value);
             }
         }
-    }
-
-    bool update_key_values(const Key& key, const Value& value) {
-        size_t index = hasher(key) & mask();
-        unsigned int PSL = 0;
-
-        while (PSL <= max_PSL) {
-            size_t i = (index + PSL) & mask();
-            if (!buckets[i].has_value()) {
-                return false;
-            }
-            if (buckets[i]->key == key) {
-                std::copy(std::begin(value), std::end(value),
-                    std::back_inserter(buckets[i]->value));
-                return true;
-            }
-
-            PSL++;
-        }
-
-        return false;
     }
 
 public:
@@ -139,10 +118,6 @@ public:
     }
 
     bool emplace(const Key& key, const Value& value) override {
-        if (update_key_values(key, value)) {
-            return true;
-        }
-
         if (_size >= capacity / 2) {
             rehash();
         }
