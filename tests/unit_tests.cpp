@@ -9,9 +9,9 @@ void sort(std::vector<std::vector<Data>>& table) {
 
 TEST_CASE("Empty join", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     ColumnarTable table1, table2;
     table1.columns.emplace_back(DataType::INT32);
     table2.columns.emplace_back(DataType::INT32);
@@ -29,13 +29,13 @@ TEST_CASE("Empty join", "[join]") {
 
 TEST_CASE("One line join", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     std::vector<std::vector<Data>> data{
         {1, },
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table(std::move(data), std::move(types));
     ColumnarTable table1 = table.to_columnar();
     ColumnarTable table2 = table.to_columnar();
@@ -58,15 +58,15 @@ TEST_CASE("One line join", "[join]") {
 
 TEST_CASE("Simple join", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     std::vector<std::vector<Data>> data{
         {1,},
         {2,},
         {3,},
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table(std::move(data), std::move(types));
     ColumnarTable table1 = table.to_columnar();
     ColumnarTable table2 = table.to_columnar();
@@ -92,9 +92,9 @@ TEST_CASE("Simple join", "[join]") {
 
 TEST_CASE("Empty Result", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     std::vector<std::vector<Data>> data1{
         {1,},
         {2,},
@@ -105,7 +105,7 @@ TEST_CASE("Empty Result", "[join]") {
         {5,},
         {6,},
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table1(std::move(data1), types);
     Table table2(std::move(data2), std::move(types));
     ColumnarTable input1 = table1.to_columnar();
@@ -124,16 +124,16 @@ TEST_CASE("Empty Result", "[join]") {
 
 TEST_CASE("Multiple same keys", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     std::vector<std::vector<Data>> data1{
         {1,},
         {1,},
         {2,},
         {3,},
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table1(std::move(data1), std::move(types));
     ColumnarTable input1 = table1.to_columnar();
     ColumnarTable input2 = table1.to_columnar();
@@ -162,9 +162,9 @@ TEST_CASE("Multiple same keys", "[join]") {
 
 TEST_CASE("NULL keys", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
     std::vector<std::vector<Data>> data1{
         {1,               },
         {1,               },
@@ -172,7 +172,7 @@ TEST_CASE("NULL keys", "[join]") {
         {2,               },
         {3,               },
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table1(std::move(data1), std::move(types));
     ColumnarTable input1 = table1.to_columnar();
     ColumnarTable input2 = table1.to_columnar();
@@ -201,9 +201,9 @@ TEST_CASE("NULL keys", "[join]") {
 
 TEST_CASE("Multiple columns", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{1, DataType::VARCHAR}, {0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 1, {{0, DataType::INT32}, {2, DataType::INT32}, {1, DataType::VARCHAR}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {1, DataType::VARCHAR}, {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 1, { {0, DataType::INT32}, {2, DataType::INT32}, {1, DataType::VARCHAR} });
     using namespace std::string_literals;
     std::vector<std::vector<Data>> data1{
         {1               , "xxx"s,},
@@ -212,7 +212,7 @@ TEST_CASE("Multiple columns", "[join]") {
         {2               , "uuu"s,},
         {3               , "vvv"s,},
     };
-    std::vector<DataType> types{DataType::INT32, DataType::VARCHAR};
+    std::vector<DataType> types{ DataType::INT32, DataType::VARCHAR };
     Table table1(std::move(data1), std::move(types));
     ColumnarTable input1 = table1.to_columnar();
     ColumnarTable input2 = table1.to_columnar();
@@ -242,9 +242,9 @@ TEST_CASE("Multiple columns", "[join]") {
 
 TEST_CASE("Build on right", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{1, DataType::VARCHAR}, {0, DataType::INT32}});
-    plan.new_join_node(false, 0, 1, 0, 1, {{0, DataType::INT32}, {2, DataType::INT32}, {1, DataType::VARCHAR}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {1, DataType::VARCHAR}, {0, DataType::INT32} });
+    plan.new_join_node(false, 0, 1, 0, 1, { {0, DataType::INT32}, {2, DataType::INT32}, {1, DataType::VARCHAR} });
     using namespace std::string_literals;
     std::vector<std::vector<Data>> data1{
         {1               , "xxx"s,},
@@ -253,7 +253,7 @@ TEST_CASE("Build on right", "[join]") {
         {2               , "uuu"s,},
         {3               , "vvv"s,},
     };
-    std::vector<DataType> types{DataType::INT32, DataType::VARCHAR};
+    std::vector<DataType> types{ DataType::INT32, DataType::VARCHAR };
     Table table1(std::move(data1), std::move(types));
     ColumnarTable input1 = table1.to_columnar();
     ColumnarTable input2 = table1.to_columnar();
@@ -283,17 +283,17 @@ TEST_CASE("Build on right", "[join]") {
 
 TEST_CASE("leftdeep 2-level join", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}});
-    plan.new_scan_node(1, {{0, DataType::INT32}});
-    plan.new_scan_node(2, {{0, DataType::INT32}});
-    plan.new_join_node(true, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}});
-    plan.new_join_node(false, 3, 2, 0, 0, {{0, DataType::INT32}, {1, DataType::INT32}, {2, DataType::INT32}});
+    plan.new_scan_node(0, { {0, DataType::INT32} });
+    plan.new_scan_node(1, { {0, DataType::INT32} });
+    plan.new_scan_node(2, { {0, DataType::INT32} });
+    plan.new_join_node(true, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32} });
+    plan.new_join_node(false, 3, 2, 0, 0, { {0, DataType::INT32}, {1, DataType::INT32}, {2, DataType::INT32} });
     std::vector<std::vector<Data>> data{
         {1,},
         {2,},
         {3,},
     };
-    std::vector<DataType> types{DataType::INT32};
+    std::vector<DataType> types{ DataType::INT32 };
     Table table(std::move(data), std::move(types));
     ColumnarTable table1 = table.to_columnar();
     ColumnarTable table2 = table.to_columnar();
@@ -322,11 +322,11 @@ TEST_CASE("leftdeep 2-level join", "[join]") {
 
 TEST_CASE("3-way join", "[join]") {
     Plan plan;
-    plan.new_scan_node(0, {{0, DataType::INT32}, {1, DataType::VARCHAR}});
-    plan.new_scan_node(1, {{0, DataType::INT32}, {1, DataType::VARCHAR}});
-    plan.new_scan_node(2, {{0, DataType::INT32}, {1, DataType::VARCHAR}});
-    plan.new_join_node(false, 0, 1, 0, 0, {{0, DataType::INT32}, {1, DataType::VARCHAR}});
-    plan.new_join_node(false, 3, 2, 0, 0, {{0, DataType::INT32}, {1, DataType::VARCHAR}, {3, DataType::VARCHAR}});
+    plan.new_scan_node(0, { {0, DataType::INT32}, {1, DataType::VARCHAR} });
+    plan.new_scan_node(1, { {0, DataType::INT32}, {1, DataType::VARCHAR} });
+    plan.new_scan_node(2, { {0, DataType::INT32}, {1, DataType::VARCHAR} });
+    plan.new_join_node(false, 0, 1, 0, 0, { {0, DataType::INT32}, {1, DataType::VARCHAR} });
+    plan.new_join_node(false, 3, 2, 0, 0, { {0, DataType::INT32}, {1, DataType::VARCHAR}, {3, DataType::VARCHAR} });
     using namespace std::string_literals;
     std::vector<std::vector<Data>> data1{
         {1, "a"s},
@@ -342,7 +342,7 @@ TEST_CASE("3-way join", "[join]") {
         {2, "v"s},
         {3, "w"s},
     };
-    std::vector<DataType> types{DataType::INT32, DataType::VARCHAR};
+    std::vector<DataType> types{ DataType::INT32, DataType::VARCHAR };
     Table table1(std::move(data1), types);
     Table table2(std::move(data2), types);
     Table table3(std::move(data3), types);

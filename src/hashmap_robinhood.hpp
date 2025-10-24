@@ -1,13 +1,14 @@
-#include "../include/hashmap.hpp"
-
 #include <functional>
 #include <utility>
 #include <algorithm>
 #include <iterator>
 #include <cstddef>
+#include <optional>
+#include <vector>
+#include <memory>
 
 template<typename Key, typename Value>
-class HashMapRobinhood : public HashMap<Key, Value> {
+class HashMapRobinhood {
 private:
     struct Node {
         Key key;
@@ -53,21 +54,40 @@ public:
         size_t index;
 
         void advance_to_valid() {
-            while (map && index < map->_capacity && !map->buckets[index].has_value()) index++;
+            if (!map) {
+                view.reset();
+                return;
+            }
+            while (index < map->_capacity && !map->buckets[index].has_value()) index++;
+            if (index < map->_capacity && map->buckets[index].has_value()) {
+                view = std::make_unique<PairView>(
+                    map->buckets[index]->key,
+                    map->buckets[index]->value);
+            }
+            else {
+                view.reset();
+            }
         }
 
         iterator(HashMapRobinhood* m, size_t start)
-            : map(m),
-            index(start) {
+            : map(m), index(start) {
             advance_to_valid();
         }
+
+        struct PairView {
+            const Key& first;
+            Value& second;
+            PairView(const Key& f, Value& s) : first(f), second(s) {}
+        };
+
+        mutable std::unique_ptr<PairView> view;
 
     public:
         using iterator_category = std::forward_iterator_tag;
         using value_type = std::pair<const Key, Value>;
         using difference_type = std::ptrdiff_t;
-        using pointer = void;
-        using reference = value_type;
+        using pointer = PairView*;
+        using reference = PairView&;
 
         iterator()
             : map(nullptr),
@@ -75,8 +95,11 @@ public:
         }
 
         reference operator*() const {
-            const Node& node = *map->buckets[index];
-            return reference(node.key, node.value);
+            return *view;
+        }
+
+        pointer operator->() const {
+            return &*view;
         }
 
         iterator& operator++() {
@@ -107,21 +130,21 @@ public:
         max_PSL(0) {
     }
 
-    ~HashMapRobinhood() override = default;
+    ~HashMapRobinhood() = default;
 
-    size_t size() const override {
+    size_t size() const {
         return _size;
     }
 
-    size_t capacity() const override {
+    size_t capacity() const {
         return _capacity;
     }
 
-    bool empty() const override {
+    bool empty() const {
         return _size == 0;
     }
 
-    bool emplace(const Key& key, const Value& value) override {
+    bool emplace(const Key& key, const Value& value) {
         if (_size >= _capacity / 2) {
             rehash();
         }
@@ -137,7 +160,7 @@ public:
             if (!buckets[i].has_value()) {
                 buckets[i].emplace(Node{ std::move(cur_key), std::move(cur_value), PSL });
                 _size++;
-                max_PSL = (PSL > max_PSL ? PSL : max_PSL);
+                max_PSL = std::max(PSL, max_PSL);
                 return true;
             }
             else if (PSL > buckets[i]->PSL) {
@@ -145,8 +168,8 @@ public:
                 buckets[i].emplace(Node{ std::move(cur_key), std::move(cur_value), PSL });
                 cur_key = std::move(old_node.key);
                 cur_value = std::move(old_node.value);
-                PSL = old_node.PSL;
-                max_PSL = (PSL > max_PSL ? PSL : max_PSL);
+                PSL = old_node.PSL + 1;
+                max_PSL = std::max(PSL, max_PSL);
             }
             else {
                 PSL++;
@@ -156,16 +179,7 @@ public:
         return false;
     }
 
-    std::optional<std::pair<Key, Value>> find(const Key& key) override {
-        auto iter = find_iterator(key);
-        if (iter == end()) {
-            return std::nullopt;
-        }
-        auto p = *iter;
-        return std::make_optional(std::make_pair(p.first, p.second));
-    }
-
-    iterator find_iterator(const Key& key) {
+    iterator find(const Key& key) {
         size_t index = hasher(key) & mask();
         unsigned int PSL = 0;
 
@@ -177,6 +191,7 @@ public:
             if (buckets[i]->key == key) {
                 return iterator(this, i);
             }
+
             PSL++;
         }
 
@@ -192,17 +207,16 @@ public:
     }
 
     template<typename Index>
-    std::optional<std::pair<Key, Value>> operator[](Index index) const {
+    iterator operator[](Index index) {
         size_t i = static_cast<size_t>(index);
         if (i >= _capacity) {
-            return std::nullopt;
+            return end();
         }
 
         if (buckets[i].has_value()) {
-            const Node& node = *buckets[i];
-            return std::make_pair(node.key, node.value);
+            return iterator(this, i);
         }
 
-        return std::nullopt;
+        return end();
     }
 };
