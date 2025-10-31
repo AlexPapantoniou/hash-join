@@ -2,12 +2,19 @@
 #include <plan.h>
 #include <table.h>
 
-// // TODO: REMOVE BEFORE SENDING
-// ---------------------------------------------
-#include <iostream>
-// ---------------------------------------------
-
+#if defined(HASH_ROBINHOOD)
 #include "hashmap_robinhood.hpp"
+template<typename Key, typename Value>
+using HashMap = HashMapRobinhood<Key, Value>;
+#elif defined(HASH_HOPSCOTCH)
+#include "hashmap_hopscotch.hpp"
+template<typename Key, typename Value>
+using HashMap = HashMapHopscotch<Key, Value>;
+#elif defined(HASH_CUCKOO)
+#include "hashmap_cuckoo.hpp"
+template<typename Key, typename Value>
+using HashMap = HashMapCuckoo<Key, Value>;
+#endif
 
 namespace Contest {
 
@@ -26,16 +33,15 @@ namespace Contest {
         template <class T>
         auto run() {
             namespace views = ranges::views;
-            // std::unordered_map<T, std::vector<size_t>> hash_table;
-            HashMapRobinhood<T, std::vector<size_t>> hash_table;
+            HashMap<T, std::vector<size_t>> hash_map;
             if (build_left) {
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
-                        [&hash_table, idx = idx](const auto& key) {
+                        [&hash_map, idx = idx](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                                if (auto itr = hash_map.find(key); itr == hash_map.end()) {
+                                    hash_map.emplace(key, std::vector<size_t>(1, idx));
                                 }
                                 else {
                                     itr->second.push_back(idx);
@@ -52,7 +58,7 @@ namespace Contest {
                         [&](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                                if (auto itr = hash_map.find(key); itr != hash_map.end()) {
                                     for (auto left_idx : itr->second) {
                                         auto& left_record = left[left_idx];
                                         std::vector<Data> new_record;
@@ -80,11 +86,11 @@ namespace Contest {
             else {
                 for (auto&& [idx, record] : right | views::enumerate) {
                     std::visit(
-                        [&hash_table, idx = idx](const auto& key) {
+                        [&hash_map, idx = idx](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                                if (auto itr = hash_map.find(key); itr == hash_map.end()) {
+                                    hash_map.emplace(key, std::vector<size_t>(1, idx));
                                 }
                                 else {
                                     itr->second.push_back(idx);
@@ -101,7 +107,7 @@ namespace Contest {
                         [&](const auto& key) {
                             using Tk = std::decay_t<decltype(key)>;
                             if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                                if (auto itr = hash_map.find(key); itr != hash_map.end()) {
                                     for (auto right_idx : itr->second) {
                                         auto& right_record = right[right_idx];
                                         std::vector<Data> new_record;

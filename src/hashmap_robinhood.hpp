@@ -1,3 +1,5 @@
+#pragma once
+
 #include <functional>
 #include <utility>
 #include <algorithm>
@@ -21,7 +23,7 @@ private:
     unsigned int max_PSL;
     std::hash<Key> hasher;
 
-    inline size_t mask() {
+    inline size_t mask() const {
         return _capacity - 1;
     }
 
@@ -36,9 +38,9 @@ private:
         size_t old_capacity = _capacity;
 
         _capacity <<= 1;
+        _size = 0;
         max_PSL = 0;
         buckets.assign(_capacity, std::nullopt);
-        _size = 0;
 
         for (std::size_t i = 0; i < old_capacity; i++) {
             if (old_buckets[i].has_value()) {
@@ -58,7 +60,9 @@ public:
                 view.reset();
                 return;
             }
-            while (index < map->_capacity && !map->buckets[index].has_value()) index++;
+            while (index < map->_capacity && !map->buckets[index].has_value()) {
+                index++;
+            }
             if (index < map->_capacity && map->buckets[index].has_value()) {
                 view = std::make_unique<PairView>(
                     map->buckets[index]->key,
@@ -90,8 +94,7 @@ public:
         using reference = PairView&;
 
         iterator()
-            : map(nullptr),
-            index(0) {
+            : map(nullptr), index(0) {
         }
 
         reference operator*() const {
@@ -145,7 +148,7 @@ public:
     }
 
     bool emplace(const Key& key, const Value& value) {
-        if (_size >= _capacity / 2) {
+        if (static_cast<double>(_size) / static_cast<double>(_capacity) >= 0.5) {
             rehash();
         }
 
