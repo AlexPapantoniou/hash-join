@@ -4,9 +4,10 @@
 #include "../src/hashmap_robinhood.hpp"
 
 TEST_CASE("HashMapRobinhood basic insertion and lookup", "[hashmap]") {
-    HashMapRobinhood<int, std::vector<size_t>> map(16);
+    HashMapRobinhood<int, std::vector<size_t>> map;
 
     REQUIRE(map.size() == 0);
+    REQUIRE(map.capacity() == 16);
     REQUIRE(map.empty());
 
     REQUIRE(map.emplace(10, std::vector<size_t>{1}));
@@ -28,7 +29,6 @@ TEST_CASE("HashMapRobinhood basic insertion and lookup", "[hashmap]") {
 
     auto val40 = map.find(40);
     REQUIRE(val40 == map.end());
-
 }
 
 TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashmap][collision]") {
@@ -50,6 +50,7 @@ TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashma
     REQUIRE(key2->first == 9);
 
     REQUIRE(map.emplace(8, std::vector<size_t>{8}));
+    // Check that each key is placed at the correct spot
     key0 = map[0];
     key1 = map[1];
     key2 = map[2];
