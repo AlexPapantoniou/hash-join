@@ -76,7 +76,6 @@ FetchContent_MakeAvailable(duckdb)
 file(GLOB SIGMODPC_SRC
     CONFIGURE_DEPENDS
     "src/*.cpp"
-    "include/hashmap.hpp"
     "src/hashmap_*.hpp"
 )
 
@@ -90,9 +89,11 @@ endif()
 
 # Targets
 add_executable(run ${SIGMODPC_SRC} tests/read_sql.cpp)
+add_executable(build_database tests/build_database.cpp)
 add_executable(unit_tests ${SIGMODPC_SRC} tests/unit_tests.cpp)
 add_executable(robinhood_tests tests/robinhood_tests.cpp)
-add_executable(build_database tests/build_database.cpp)
+add_executable(hopscotch_tests tests/hopscotch_tests.cpp)
+add_executable(cuckoo_tests tests/cuckoo_tests.cpp)
 
 # For all executables
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -117,12 +118,23 @@ target_compile_definitions(run PRIVATE TEAMOPT_USE_DUCKDB)
 target_link_libraries(build_database PRIVATE fmt duckdb)
 target_link_libraries(unit_tests PRIVATE re2 range-v3 fmt Catch2::Catch2WithMain)
 target_link_libraries(robinhood_tests PRIVATE Catch2::Catch2WithMain fmt)
+target_link_libraries(hopscotch_tests PRIVATE Catch2::Catch2WithMain fmt)
+target_link_libraries(cuckoo_tests PRIVATE Catch2::Catch2WithMain fmt)
 
 target_include_directories(run PRIVATE include)
 target_include_directories(build_database PRIVATE include)
 target_include_directories(unit_tests PRIVATE include)
 target_include_directories(robinhood_tests PRIVATE include)
+target_include_directories(hopscotch_tests PRIVATE include)
+target_include_directories(cuckoo_tests PRIVATE include)
 
-
-
-
+option(HASH_ALGORITHM "Choose hashing algorithm (robinhood, hopscotch, cuckoo)" "robinhood")
+if(HASH_ALGORITHM STREQUAL "robinhood")
+    add_compile_definitions(HASH_ROBINHOOD)
+elseif(HASH_ALGORITHM STREQUAL "hopscotch")
+    add_compile_definitions(HASH_HOPSCOTCH)
+elseif(HASH_ALGORITHM STREQUAL "cuckoo")
+    add_compile_definitions(HASH_CUCKOO)
+else()
+    message(FATAL_ERROR "Unknown HASH_ALGORITHM: ${HASH_ALGORITHM}")
+endif()
