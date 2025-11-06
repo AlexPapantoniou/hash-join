@@ -50,8 +50,7 @@ private:
         _capacity <<= 1;
         _size = 0;
         max_PSL = 0;
-        buckets.clear();
-        buckets.resize(_capacity);
+        buckets.assign(_capacity, std::nullopt);
 
         for (std::size_t i = 0; i < old_capacity; i++) {
             auto& bucket = old_buckets[i];
@@ -153,9 +152,8 @@ public:
             rehash();
         }
 
-        size_t hash = mix_hash(hasher(key));
         const size_t cap_mask = mask();
-        size_t index = hash & cap_mask;
+        size_t index = mix_hash(hasher(key)) & cap_mask;
 
         unsigned int PSL = 0;
         Key cur_key = key;
@@ -192,9 +190,8 @@ public:
             rehash();
         }
 
-        size_t hash = mix_hash(hasher(key));
         const size_t cap_mask = mask();
-        size_t index = hash & cap_mask;
+        size_t index = mix_hash(hasher(key)) & cap_mask;
 
         unsigned int PSL = 0;
         Key cur_key = std::move(key);

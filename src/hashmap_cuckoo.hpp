@@ -15,7 +15,7 @@ template<typename Key>
 struct CuckooHashers {
     std::hash<Key> hasher;
 
-    size_t h1(const Key& key) const noexcept {
+    inline size_t h1(const Key& key) const noexcept {
         return hasher(key);
     }
 
@@ -28,7 +28,7 @@ struct CuckooHashers {
         return h;
     }
 
-    size_t h2(const Key& key) const noexcept {
+    inline size_t h2(const Key& key) const noexcept {
         return mix_hash(hasher(key));
     }
 };
@@ -71,16 +71,16 @@ private:
             bool all_ok = true;
 
             for (size_t i = 0; i < old_capacity; i++) {
-                if (old_buckets1[i].has_value()) {
-                    auto node = *old_buckets1[i];
-                    if (!emplace_no_rehash(node.key, node.value, cap_mask)) {
+                auto& bucket = old_buckets1[i];
+                if (bucket.has_value()) {
+                    if (!emplace_no_rehash(std::move(bucket->key), std::move(bucket->value), cap_mask)) {
                         all_ok = false;
                         break;
                     }
                 }
-                if (old_buckets2[i].has_value()) {
-                    auto node = *old_buckets2[i];
-                    if (!emplace_no_rehash(node.key, node.value, cap_mask)) {
+                bucket = old_buckets2[i];
+                if (bucket.has_value()) {
+                    if (!emplace_no_rehash(std::move(bucket->key), std::move(bucket->value), cap_mask)) {
                         all_ok = false;
                         break;
                     }
@@ -146,31 +146,21 @@ public:
             if (!map) {
                 return;
             }
-            while (true) {
-                if (in_buckets1) {
-                    while (index < map->_capacity) {
-                        if (map->buckets1[index].has_value()) {
-                            return;
-                        }
-                        index++;
-                    }
-                    in_buckets1 = false;
-                    index = 0;
-                    continue;
-                }
-                else {
-                    while (index < map->_capacity) {
-                        if (map->buckets2[index].has_value()) {
-                            return;
-                        }
-                        index++;
-                    }
 
-                    map = nullptr;
-                    index = 0;
-                    in_buckets1 = true;
+            while (true) {
+                auto& table = in_buckets1 ? map->buckets1 : map->buckets2;
+                while (index < map->_capacity && !table[index].has_value()) {
+                    index++;
+                }
+                if (index < map->_capacity) {
                     return;
                 }
+                if (!in_buckets1) {
+                    map = nullptr;
+                    return;
+                }
+                in_buckets1 = false;
+                index = 0;
             }
         }
 
@@ -256,7 +246,7 @@ public:
     }
 
     bool emplace(const Key& key, const Value& value) {
-        if ((_size + 1) * 4 >= _capacity * 3) {
+        if ((_size + 1) * 10 >= _capacity * 9) {
             rehash();
         }
 
@@ -277,6 +267,28 @@ public:
         }
 
         return false;
+    }
+
+    bool emplace(Key&& key, Value&& value) {
+        if ((_size + 1) * 10 >= _capacity * 9) {
+            rehash();
+        }
+
+        Key cur_key = std::move(key);
+        Value cur_value = std::move(value);
+
+        if (emplace_no_rehash(std::move(cur_key), std::move(cur_value), mask())) {
+            return true;
+        }
+
+        while (true) {
+            rehash();
+            cur_key = std::move(key);
+            cur_value = std::move(value);
+            if (emplace_no_rehash(std::move(cur_key), std::move(cur_value), mask())) {
+                return true;
+            }
+        }
     }
 
     iterator find(const Key& key) {
