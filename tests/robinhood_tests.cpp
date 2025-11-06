@@ -3,6 +3,7 @@
 
 #include "../src/hashmap_robinhood.hpp"
 
+// Test that simple insertions work and the keys are found successfully 
 TEST_CASE("HashMapRobinhood basic insertion and lookup", "[hashmap]") {
     HashMapRobinhood<int, std::vector<size_t>> map;
 
@@ -28,44 +29,46 @@ TEST_CASE("HashMapRobinhood basic insertion and lookup", "[hashmap]") {
     REQUIRE(val20->second == std::vector<size_t>{2, 3});
 
     auto val40 = map.find(40);
-    REQUIRE(val40 == map.end());
+    REQUIRE(val40 == map.end());    // Key '40' shouldn't exist
 }
 
-TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashmap][collision]") {
+// Test that when collisions happen, each key gets moved to the expected position
+TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashmap][collision][hashfunction]") {
     HashMapRobinhood<size_t, std::vector<size_t>> map(8);
 
-    REQUIRE(map.emplace(0, std::vector<size_t>{0}));
-    auto key0 = map[0];
-    REQUIRE(key0 != map.end());
-    REQUIRE(key0->first == 0);
+    REQUIRE(map.emplace(11, std::vector<size_t>{11}));
+    auto key11 = map[4];     // Search keys via exact position in the hash map
+    REQUIRE(key11 != map.end());
+    REQUIRE(key11->first == 11);
 
-    REQUIRE(map.emplace(1, std::vector<size_t>{1}));
-    auto key1 = map[1];
-    REQUIRE(key1 != map.end());
-    REQUIRE(key1->first == 1);
+    REQUIRE(map.emplace(10, std::vector<size_t>{10}));
+    auto key10 = map[5];
+    REQUIRE(key10 != map.end());
+    REQUIRE(key10->first == 10);
 
-    REQUIRE(map.emplace(9, std::vector<size_t>{9}));
-    auto key2 = map[2];
-    REQUIRE(key2 != map.end());
-    REQUIRE(key2->first == 9);
+    REQUIRE(map.emplace(12, std::vector<size_t>{12}));
+    auto key12 = map[6];
+    REQUIRE(key12 != map.end());
+    REQUIRE(key12->first == 12);
 
-    REQUIRE(map.emplace(8, std::vector<size_t>{8}));
+    REQUIRE(map.emplace(14, std::vector<size_t>{14}));
     // Check that each key is placed at the correct spot
-    key0 = map[0];
-    key1 = map[1];
-    key2 = map[2];
-    auto key3 = map[3];
-    REQUIRE(key0 != map.end());
-    REQUIRE(key1 != map.end());
-    REQUIRE(key2 != map.end());
-    REQUIRE(key3 != map.end());
-    REQUIRE(key0->first == 0);
-    REQUIRE(key1->first == 8);
-    REQUIRE(key2->first == 1);
-    REQUIRE(key3->first == 9);
+    key11 = map[4];
+    auto key14 = map[5];
+    key10 = map[6];
+    key12 = map[7];
+    REQUIRE(key11 != map.end());
+    REQUIRE(key14 != map.end());
+    REQUIRE(key10 != map.end());
+    REQUIRE(key12 != map.end());
+    REQUIRE(key11->first == 11);
+    REQUIRE(key14->first == 14);
+    REQUIRE(key10->first == 10);
+    REQUIRE(key12->first == 12);
 }
 
-TEST_CASE("HashMapRobinhood rehashes correctly when load factor exceeds 0.5", "[hashmap][rehash]") {
+// Test proper rehashing
+TEST_CASE("HashMapRobinhood rehashes correctly when load factor exceeds 0.75", "[hashmap][rehash]") {
     HashMapRobinhood<size_t, std::vector<size_t>> map(3);
     size_t old_capacity = 3;
 
@@ -76,7 +79,7 @@ TEST_CASE("HashMapRobinhood rehashes correctly when load factor exceeds 0.5", "[
     }
 
     REQUIRE(map.size() == 10);
-    REQUIRE(map.capacity() == 32);
+    REQUIRE(map.capacity() == 16);
 
     for (size_t i = 0; i < 10; i++) {
         auto res = map.find(i);
@@ -85,6 +88,7 @@ TEST_CASE("HashMapRobinhood rehashes correctly when load factor exceeds 0.5", "[
     }
 }
 
+// Test that hash map works with other data types of keys
 TEST_CASE("HashMapRobinhood supports string keys", "[hashmap][string]") {
     HashMapRobinhood<std::string, std::vector<size_t>> map;
 

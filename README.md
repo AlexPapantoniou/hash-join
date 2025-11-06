@@ -1,4 +1,5 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/gjaw_qSU)
+
 # SIGMOD Contest 2025
 
 ## Task
@@ -46,10 +47,12 @@ struct Plan {
 ```
 
 **Scan**:
+
 - The `base_table_id` member refers to which input table in the `inputs` member of a plan is used by the Scan node.
 - Each item in the `output_attrs` indicates which column in the base table should be output and what type it is.
 
 **Join**:
+
 - The `build_left` member refers to which side the hash table should be built on, where `true` indicates building the hash table on the left child, and `false` indicates the opposite.
 - The `left` and `right` members are the indexes of the left and right child of the Join node in the `nodes` member of a plan, respectively.
 - The `left_attr` and `right_attr` members are the join condition of Join node. Supposing that there are two records, `left_record` and `right_record`, from the intermediate results of the left and right child, respectively. The members indicate that the two records should be joined when `left_record[left_attr] == right_record[right_attr]`.
@@ -131,13 +134,15 @@ Third, prepare the DuckDB database for correctness checking.
 ```
 
 Now, you can run the tests:
+
 ```bash
 ./build/run plans.json
 ```
+
 > [!TIP]
 > If you want to use `Ninja Multi-Config` as the generator. The commands will look like:
-> 
->```bash
+>
+> ```bash
 > cmake -S . -B build -Wno-dev -G "Ninja Multi-Config"
 > cmake --build build --config Release -- -j $(nproc)
 > ./build/Release/build_database imdb.db
@@ -145,37 +150,53 @@ Now, you can run the tests:
 > ```
 
 # Cache
+
 ## This section is only for UNIX users
+
 There are 2 new executables with this repository. They cache the join tables and
 result of each query and mmap them for faster loading times and getting rid of duckdb.
 
 To build the cache you need to run:
+
 ```bash
 ./build/build_cache plans.json
 ```
 
-> [!TIP] 
+> [!TIP]
 > If you are using `Linux x86_64` you can download our prebuilt cache with:
+>
 > ```
 > wget http://share.uoa.gr/protected/all-download/sigmod25/sigmod25_cache_x86.tar.gz
 > ```
+>
 > If you are using `macOS arm64` you can download our prebuilt cache with:
+>
 > ```
 > wget http://share.uoa.gr/protected/all-download/sigmod25/sigmod25_cache_arm.tar.gz
 > ```
+>
 > For all other systems you will need to build the cache on your own.
 
 After the cache is built you can run the queries using:
+
 ```bash
 ./build/fast plans.json
 ```
 
 Also after you have built the cache you no longer need to build the `run` executable
-every time (which depends on duckdb and can be slow to compile). Just compile 
+every time (which depends on duckdb and can be slow to compile). Just compile
 the executable that uses the cache:
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
 cmake --build build -- -j $(nproc) fast
 ```
 
 Code is compiled with Clang 18.
+
+Times
+
+std::unordered_map: 230110 ms
+robinhood: 231420 ms
+hopscotch:
+cuckoo: 245648 ms

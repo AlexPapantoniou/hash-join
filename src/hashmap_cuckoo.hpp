@@ -9,6 +9,8 @@
 #include <vector>
 #include <memory>
 
+#include <iostream>
+
 template<typename Key>
 struct CuckooHashers {
     std::hash<Key> hasher;
@@ -17,14 +19,17 @@ struct CuckooHashers {
         return hasher(key);
     }
 
+    static size_t mix_hash(size_t h) noexcept {
+        h ^= (h >> 33);
+        h *= 0xff51afd7ed558ccdULL;
+        h ^= (h >> 33);
+        h *= 0xc4ceb9fe1a85ec53ULL;
+        h ^= (h >> 33);
+        return h;
+    }
+
     size_t h2(const Key& key) const noexcept {
-        size_t x = hasher(key);
-        x ^= (x >> 33);
-        x *= 0xff51afd7ed558ccdULL;
-        x ^= (x >> 33);
-        x *= 0xc4ceb9fe1a85ec53ULL;
-        x ^= (x >> 33);
-        return x;
+        return mix_hash(hasher(key));
     }
 };
 
@@ -38,14 +43,14 @@ private:
     size_t _capacity;
     std::vector<std::optional<Node>> buckets1;
     std::vector<std::optional<Node>> buckets2;
-    size_t _size = 0;
+    size_t _size;
     CuckooHashers<Key> hashers;
 
-    inline size_t mask() const {
+    inline size_t mask() const noexcept {
         return _capacity - 1;
     }
 
-    static size_t next_power_of_two(size_t n) {
+    static size_t next_power_of_two(size_t n) noexcept {
         size_t p = 1;
         while (p < n) p <<= 1;
         return p;
@@ -56,86 +61,149 @@ private:
         std::vector<std::optional<Node>> old_buckets2 = std::move(buckets2);
         size_t old_capacity = _capacity;
 
-        _capacity <<= 1;
-        _size = 0;
-        buckets1.assign(_capacity, std::nullopt);
-        buckets2.assign(_capacity, std::nullopt);
+        while (true) {
+            _capacity <<= 1;
+            buckets1.assign(_capacity, std::nullopt);
+            buckets2.assign(_capacity, std::nullopt);
 
-        for (size_t i = 0; i < old_capacity; i++) {
-            if (old_buckets1[i].has_value()) {
-                emplace(old_buckets1[i]->key, old_buckets1[i]->value);
+            _size = 0;
+            const size_t cap_mask = mask();
+            bool all_ok = true;
+
+            for (size_t i = 0; i < old_capacity; i++) {
+                if (old_buckets1[i].has_value()) {
+                    auto node = *old_buckets1[i];
+                    if (!emplace_no_rehash(node.key, node.value, cap_mask)) {
+                        all_ok = false;
+                        break;
+                    }
+                }
+                if (old_buckets2[i].has_value()) {
+                    auto node = *old_buckets2[i];
+                    if (!emplace_no_rehash(node.key, node.value, cap_mask)) {
+                        all_ok = false;
+                        break;
+                    }
+                }
             }
-            if (old_buckets2[i].has_value()) {
-                emplace(old_buckets2[i]->key, old_buckets2[i]->value);
+
+            if (all_ok) {
+                return;
             }
         }
     }
 
+    // Helper for rehash(): insert without triggering another rehash
+    bool emplace_no_rehash(Key key, Value value, size_t cap_mask) {
+        bool in_buckets1 = true;
+        size_t loop_count = 0;
+        constexpr size_t MAX_KICKS = 512;
+
+        while (loop_count < MAX_KICKS) {
+            if (in_buckets1) {
+                size_t index = hashers.h1(key) & cap_mask;
+                auto& bucket = buckets1[index];
+                if (!bucket.has_value()) {
+                    bucket.emplace(Node{ std::move(key), std::move(value) });
+                    _size++;
+                    return true;
+                }
+                Node old_node = std::move(*bucket);
+                bucket.emplace(Node{ std::move(key), std::move(value) });
+                key = std::move(old_node.key);
+                value = std::move(old_node.value);
+            }
+            else {
+                size_t index = hashers.h2(key) & cap_mask;
+                auto& bucket = buckets2[index];
+                if (!bucket.has_value()) {
+                    bucket.emplace(Node{ std::move(key), std::move(value) });
+                    _size++;
+                    return true;
+                }
+                Node old_node = std::move(*bucket);
+                bucket.emplace(Node{ std::move(key), std::move(value) });
+                key = std::move(old_node.key);
+                value = std::move(old_node.value);
+            }
+
+            in_buckets1 = !in_buckets1;
+            loop_count++;
+        }
+
+        return false;
+    }
+
 public:
     class iterator {
+    private:
         friend class HashMapCuckoo;
         HashMapCuckoo* map;
         size_t index;
+        bool in_buckets1;
 
         void advance_to_valid() {
             if (!map) {
-                view.reset();
                 return;
             }
-            while (index < map->_capacity && (!map->buckets1[index].has_value() && !map->buckets2[index].has_value())) {
-                index++;
-            }
-            if (index < map->_capacity && map->buckets1[index].has_value()) {
-                view = std::make_unique<PairView>(
-                    map->buckets1[index]->key,
-                    map->buckets1[index]->value
-                );
-            }
-            else if (index < map->_capacity && map->buckets2[index].has_value()) {
-                view = std::make_unique<PairView>(
-                    map->buckets2[index]->key,
-                    map->buckets2[index]->value
-                );
-            }
-            else {
-                view.reset();
-                return;
+            while (true) {
+                if (in_buckets1) {
+                    while (index < map->_capacity) {
+                        if (map->buckets1[index].has_value()) {
+                            return;
+                        }
+                        index++;
+                    }
+                    in_buckets1 = false;
+                    index = 0;
+                    continue;
+                }
+                else {
+                    while (index < map->_capacity) {
+                        if (map->buckets2[index].has_value()) {
+                            return;
+                        }
+                        index++;
+                    }
+
+                    map = nullptr;
+                    index = 0;
+                    in_buckets1 = true;
+                    return;
+                }
             }
         }
 
-        iterator(HashMapCuckoo* m, size_t start)
-            : map(m), index(start) {
+        iterator(HashMapCuckoo* m, size_t start, bool first)
+            : map(m), index(start), in_buckets1(first) {
             advance_to_valid();
         }
-
-        struct PairView {
-            const Key& first;
-            Value& second;
-            PairView(const Key& f, Value& s) : first(f), second(s) {}
-        };
-
-        mutable std::unique_ptr<PairView> view;
 
     public:
         using iterator_category = std::forward_iterator_tag;
         using value_type = std::pair<const Key, Value>;
         using difference_type = std::ptrdiff_t;
-        using pointer = PairView*;
-        using reference = PairView&;
+        using pointer = value_type*;
+        using reference = value_type&;
 
         iterator()
-            : map(nullptr), index(0) {
+            : map(nullptr), index(0), in_buckets1(true) {
         }
 
         reference operator*() const {
-            return *view;
+            auto& node = in_buckets1 ? *map->buckets1[index] : *map->buckets2[index];
+            return *reinterpret_cast<value_type*>(&node);
         }
 
         pointer operator->() const {
-            return &*view;
+            auto& node = in_buckets1 ? *map->buckets1[index] : *map->buckets2[index];
+            return reinterpret_cast<value_type*>(&node);
         }
 
         iterator& operator++() {
+            if (!map) {
+                return *this;
+            }
             index++;
             advance_to_valid();
             return *this;
@@ -148,7 +216,7 @@ public:
         }
 
         bool operator==(const iterator& other) const {
-            return map == other.map && index == other.index;
+            return map == other.map && index == other.index && in_buckets1 == other.in_buckets1;
         }
 
         bool operator!=(const iterator& other) const {
@@ -156,8 +224,9 @@ public:
         }
     };
 
+public:
     HashMapCuckoo(size_t initial_capacity = 16)
-        : _capacity(std::max<size_t>(1, next_power_of_two(initial_capacity))),
+        : _capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),
         buckets1(_capacity),
         buckets2(_capacity),
         _size(0) {
@@ -165,82 +234,71 @@ public:
 
     ~HashMapCuckoo() = default;
 
-    size_t size() const {
+    size_t size() const noexcept {
         return _size;
     }
 
-    size_t capacity() const {
+    size_t capacity() const noexcept {
         return _capacity;
     }
 
-    bool empty() const {
+    bool empty() const noexcept {
         return _size == 0;
     }
 
+    void reserve(size_t expected) {
+        if (expected == 0) {
+            expected = 1;
+        }
+        _capacity = next_power_of_two(std::max<size_t>(1, static_cast<size_t>(expected * 1.5)));
+        buckets1.assign(_capacity, std::nullopt);
+        buckets2.assign(_capacity, std::nullopt);
+    }
+
     bool emplace(const Key& key, const Value& value) {
-        if (static_cast<double>(_size) / static_cast<double>(_capacity) >= 0.7) {
+        if ((_size + 1) * 4 >= _capacity * 3) {
             rehash();
         }
-
-        size_t index;
-        bool in_buckets1 = true;
-        size_t loop_count = 0;
 
         Key cur_key = key;
         Value cur_value = value;
 
-        while (loop_count < _capacity) {
-            if (in_buckets1) {
-                index = hashers.h1(cur_key) & mask();
-                if (!buckets1[index].has_value()) {
-                    buckets1[index].emplace(Node{ std::move(cur_key), std::move(cur_value) });
-                    _size++;
-                    return true;
-                }
-                Node old_node = std::move(*buckets1[index]);
-                buckets1[index].emplace(Node{ std::move(cur_key), std::move(cur_value) });
-                cur_key = std::move(old_node.key);
-                cur_value = std::move(old_node.value);
-            }
-            else {
-                index = hashers.h2(cur_key) & mask();
-                if (!buckets2[index].has_value()) {
-                    buckets2[index].emplace(Node{ std::move(cur_key), std::move(cur_value) });
-                    _size++;
-                    return true;
-                }
-                Node old_node = std::move(*buckets2[index]);
-                buckets2[index].emplace(Node{ std::move(cur_key), std::move(cur_value) });
-                cur_key = std::move(old_node.key);
-                cur_value = std::move(old_node.value);
-            }
-            in_buckets1 = !in_buckets1;
-            loop_count++;
+        if (emplace_no_rehash(std::move(cur_key), std::move(cur_value), mask())) {
+            return true;
         }
 
-        rehash();
-        return emplace(std::move(cur_key), std::move(cur_value));
+        while (true) {
+            rehash();
+            cur_key = key;
+            cur_value = value;
+            if (emplace_no_rehash(std::move(cur_key), std::move(cur_value), mask())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     iterator find(const Key& key) {
-        size_t index1 = hashers.h1(key) & mask();
+        const size_t cap_mask = mask();
+        size_t index1 = hashers.h1(key) & cap_mask;
         if (buckets1[index1].has_value() && buckets1[index1]->key == key) {
-            return iterator(this, index1);
+            return iterator(this, index1, true);
         }
-        size_t index2 = hashers.h2(key) & mask();
+        size_t index2 = hashers.h2(key) & cap_mask;
         if (buckets2[index2].has_value() && buckets2[index2]->key == key) {
-            return iterator(this, index2);
+            return iterator(this, index2, false);
         }
 
         return end();
     }
 
     iterator begin() {
-        return iterator(this, 0);
+        return iterator(nullptr, 0, true);
     }
 
     iterator end() {
-        return iterator(this, _capacity);
+        return iterator(nullptr, _capacity, true);
     }
 
     template<typename Index>
@@ -250,11 +308,39 @@ public:
             return end();
         }
 
-        if (buckets1[i].has_value() || buckets2[i].has_value()) {
-            return iterator(this, i);
+        if (buckets1[i].has_value()) {
+            return iterator(this, i, true);
+        }
+        if (buckets2[i].has_value()) {
+            return iterator(this, i, false);
         }
 
         return end();
+    }
+
+    void debug_dump(const std::string& label = "") const {
+        std::cout << "\n=== Cuckoo HashMap Dump";
+        if (!label.empty()) std::cout << " (" << label << ")";
+        std::cout << " ===\n";
+        std::cout << "Capacity: " << _capacity << ", Size: " << _size << "\n";
+
+        std::cout << "Table 1:\n";
+        for (size_t i = 0; i < _capacity; ++i) {
+            if (buckets1[i].has_value()) {
+                const auto& n = *buckets1[i];
+                std::cout << "  [" << i << "] key=" << n.key << "\n";
+            }
+        }
+
+        std::cout << "Table 2:\n";
+        for (size_t i = 0; i < _capacity; ++i) {
+            if (buckets2[i].has_value()) {
+                const auto& n = *buckets2[i];
+                std::cout << "  [" << i << "] key=" << n.key << "\n";
+            }
+        }
+
+        std::cout << "=============================\n";
     }
 
 };

@@ -8,7 +8,6 @@
 #include <optional>
 #include <vector>
 #include <memory>
-#include <type_traits>
 
 template<typename Key, typename Value>
 class HashMapRobinhood {
@@ -65,6 +64,7 @@ private:
 
 public:
     class iterator {
+    private:
         friend class HashMapRobinhood;
         HashMapRobinhood* map;
         size_t index;
@@ -156,8 +156,8 @@ public:
         size_t hash = mix_hash(hasher(key));
         const size_t cap_mask = mask();
         size_t index = hash & cap_mask;
-        unsigned int PSL = 0;
 
+        unsigned int PSL = 0;
         Key cur_key = key;
         Value cur_value = value;
 
@@ -195,8 +195,8 @@ public:
         size_t hash = mix_hash(hasher(key));
         const size_t cap_mask = mask();
         size_t index = hash & cap_mask;
-        unsigned int PSL = 0;
 
+        unsigned int PSL = 0;
         Key cur_key = std::move(key);
         Value cur_value = std::move(value);
 

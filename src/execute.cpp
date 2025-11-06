@@ -2,6 +2,8 @@
 #include <plan.h>
 #include <table.h>
 
+#include <cmath>
+
 #if defined(HASH_ROBINHOOD)
 #include "hashmap_robinhood.hpp"
 template<typename Key, typename Value>
@@ -14,6 +16,10 @@ using HashMap = HashMapHopscotch<Key, Value>;
 #include "hashmap_cuckoo.hpp"
 template<typename Key, typename Value>
 using HashMap = HashMapCuckoo<Key, Value>;
+#elif defined(HASH_STANDARD)
+#include <unordered_map>
+template<typename Key, typename Value>
+using HashMap = std::unordered_map<Key, Value>;
 #endif
 
 namespace Contest {
@@ -33,7 +39,9 @@ namespace Contest {
         template <class T>
         auto run() {
             namespace views = ranges::views;
+            size_t build_rows = build_left ? left.size() : right.size();
             HashMap<T, std::vector<size_t>> hash_map;
+            hash_map.reserve(static_cast<size_t>(std::ceil(build_rows / 0.75)));
             if (build_left) {
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
@@ -132,6 +140,7 @@ namespace Contest {
                         left_record[left_col]);
                 }
             }
+            // hash_map.debug_dump();
         }
     };
 
