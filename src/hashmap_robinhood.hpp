@@ -1,5 +1,9 @@
 #pragma once
 
+#include <optional>
+#include <vector>
+// #include <memory>
+
 template<typename Key, typename Value>
 class HashMapRobinhood {
 private:

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <vector>
+
 // The 2 hashers for cuckoo hashing
 template<typename Key>
 struct CuckooHashers {

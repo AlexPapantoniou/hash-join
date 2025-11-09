@@ -37,12 +37,12 @@ TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashma
     HashMapRobinhood<size_t, std::vector<size_t>> map(8);
 
     REQUIRE(map.emplace(11, std::vector<size_t>{11}));
-    auto key11 = map[4];     // Search keys via exact position in the hash map
+    auto key11 = map[5];     // Search keys via exact position in the hash map
     REQUIRE(key11 != map.end());
     REQUIRE(key11->first == 11);
 
     REQUIRE(map.emplace(10, std::vector<size_t>{10}));
-    auto key10 = map[5];
+    auto key10 = map[4];
     REQUIRE(key10 != map.end());
     REQUIRE(key10->first == 10);
 
@@ -51,19 +51,19 @@ TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashma
     REQUIRE(key12 != map.end());
     REQUIRE(key12->first == 12);
 
-    REQUIRE(map.emplace(14, std::vector<size_t>{14}));
+    REQUIRE(map.emplace(13, std::vector<size_t>{13}));
     // Check that each key is placed at the correct spot
-    key11 = map[4];
-    auto key14 = map[5];
-    key10 = map[6];
+    key10 = map[4];
+    auto key13 = map[5];
+    key11 = map[6];
     key12 = map[7];
-    REQUIRE(key11 != map.end());
-    REQUIRE(key14 != map.end());
     REQUIRE(key10 != map.end());
+    REQUIRE(key13 != map.end());
+    REQUIRE(key11 != map.end());
     REQUIRE(key12 != map.end());
-    REQUIRE(key11->first == 11);
-    REQUIRE(key14->first == 14);
     REQUIRE(key10->first == 10);
+    REQUIRE(key13->first == 13);
+    REQUIRE(key11->first == 11);
     REQUIRE(key12->first == 12);
 }
 
