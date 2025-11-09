@@ -3,11 +3,21 @@
 
 #include "../src/hashmap_hopscotch.hpp"
 
+size_t mix_hash(size_t i) noexcept {
+    i += 1ull;
+    i ^= i >> 33ull;
+    i *= 0xff51afd7ed558ccdull;
+    i ^= i >> 33ull;
+    i *= 0xc4ceb9fe1a85ec53ull;
+    i ^= i >> 33ull;
+    return i;
+}
+
 template<typename Key, typename Value>
 bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsigned int hop_length) {
     std::hash<Key> hasher;
     size_t capacity = map.capacity();
-    size_t home = hasher(key) & (capacity - 1);
+    size_t home = mix_hash(hasher(key)) & (capacity - 1);
 
     for (unsigned int i = 0; i < hop_length; i++) {
         size_t index = (home + i) & (capacity - 1);
@@ -21,7 +31,7 @@ bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsi
 }
 
 TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
-    HashMapHopscotch<int, std::string> map(8, 4);
+    HashMapHopscotch<int, std::string> map(8);
 
     REQUIRE(map.size() == 0);
     REQUIRE(map.empty());
@@ -49,7 +59,7 @@ TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
 
 TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap][collisions]") {
     constexpr unsigned int hop_len = 4;
-    HashMapHopscotch<int, std::string> map(8, hop_len);
+    HashMapHopscotch<int, std::string> map(8);
 
     std::vector<int> keys = { 0, 8, 16, 24, 32 };
 
@@ -62,7 +72,7 @@ TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap
     size_t capacity = map.capacity();
 
     for (int key : keys) {
-        size_t home = hasher(key) & (capacity - 1);
+        size_t home = mix_hash(hasher(key)) & (capacity - 1);
         bool found_in_neighborhood = false;
 
         for (unsigned int offset = 0; offset < hop_len; ++offset) {
@@ -80,7 +90,7 @@ TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap
 
 TEST_CASE("HashMapHopscotch ensures keys stay within hop neighborhood", "[hashmap][collision]") {
     constexpr unsigned int hop_length = 4;
-    HashMapHopscotch<int, std::string> map(7, hop_length);
+    HashMapHopscotch<int, std::string> map(7);
 
     REQUIRE(map.capacity() == 8);
 
@@ -94,7 +104,7 @@ TEST_CASE("HashMapHopscotch ensures keys stay within hop neighborhood", "[hashma
 }
 
 TEST_CASE("HashMapHopscotch rehashes correctly when load factor exceeds 0.7", "[hashmap][rehash]") {
-    HashMapHopscotch<size_t, size_t> map(4, 4);
+    HashMapHopscotch<size_t, size_t> map(4);
     size_t old_capacity = map.capacity();
 
     for (size_t i = 0; i < 10; i++) {
