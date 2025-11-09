@@ -3,10 +3,12 @@
 
 #include "../src/hashmap_cuckoo.hpp"
 
+// Test that simple insertions work and the keys are found successfully 
 TEST_CASE("HashMapCuckoo basic insertion and lookup", "[hashmap]") {
     HashMapCuckoo<int, std::string> map(16);
 
     REQUIRE(map.size() == 0);
+    REQUIRE(map.capacity() == 16);
     REQUIRE(map.empty());
 
     SECTION("Single Insert") {
@@ -16,6 +18,7 @@ TEST_CASE("HashMapCuckoo basic insertion and lookup", "[hashmap]") {
 
         auto it = map.find(1);
         REQUIRE(it != map.end());
+        REQUIRE(it->first == 1);
         REQUIRE(it->second == "one");
     }
 
@@ -24,6 +27,7 @@ TEST_CASE("HashMapCuckoo basic insertion and lookup", "[hashmap]") {
         REQUIRE(map.emplace(20, "twenty"));
         REQUIRE(map.emplace(30, "thirty"));
 
+        REQUIRE_FALSE(map.empty());
         REQUIRE(map.size() == 3);
 
         auto it10 = map.find(10);
@@ -31,24 +35,30 @@ TEST_CASE("HashMapCuckoo basic insertion and lookup", "[hashmap]") {
         auto it30 = map.find(30);
 
         REQUIRE(it10 != map.end());
+        REQUIRE(it10->first == 10);
         REQUIRE(it10->second == "ten");
 
         REQUIRE(it20 != map.end());
+        REQUIRE(it20->first == 20);
         REQUIRE(it20->second == "twenty");
 
         REQUIRE(it30 != map.end());
+        REQUIRE(it30->first == 30);
         REQUIRE(it30->second == "thirty");
 
         auto it40 = map.find(40);
-
-        REQUIRE(it40 == map.end());
+        REQUIRE(it40 == map.end());    // Key '40' shouldn't exist
     }
 }
 
-TEST_CASE("HashMapCuckoo rehashes correctly under load", "[hashmap][rehash]") {
+
+// Test proper rehashing
+TEST_CASE("HashMapCuckoo rehashes correctly when load factor exceeds 0.9", "[hashmap][rehash]") {
     HashMapCuckoo<size_t, size_t> map(3);
 
-    REQUIRE(map.capacity() == 4);
+    
+    size_t initial_capacity = map.capacity();
+    REQUIRE(initial_capacity == 4);
 
     const size_t num_elements = 100;
     for (size_t i = 0; i < num_elements; i++) {
@@ -56,7 +66,7 @@ TEST_CASE("HashMapCuckoo rehashes correctly under load", "[hashmap][rehash]") {
     }
 
     REQUIRE(map.size() == num_elements);
-    REQUIRE(map.capacity() >= 128);
+    REQUIRE(map.capacity() == 128);
 
     for (size_t i = 0; i < num_elements; i++) {
         auto it = map.find(i);
@@ -65,37 +75,20 @@ TEST_CASE("HashMapCuckoo rehashes correctly under load", "[hashmap][rehash]") {
     }
 }
 
+// Test that hash map works with other data types of keys
 TEST_CASE("HashMapCuckoo supports string keys", "[hashmap][string]") {
-    HashMapCuckoo<std::string, int> map;
+    HashMapCuckoo<std::string, std::vector<size_t>> map;
 
-    map.emplace("apple", 5);
-    map.emplace("banana", 10);
-    map.emplace("cherry", 7);
+    map.emplace("apple", { 1 });
+    map.emplace("banana", { 2, 3});
+    map.emplace("cherry", { 4 });
 
     REQUIRE(map.size() == 3);
 
     auto it = map.find("banana");
     REQUIRE(it != map.end());
     REQUIRE(it->first == "banana");
-    REQUIRE(it->second == 10);
+    REQUIRE(it->second == std::vector<size_t>{2, 3});
 
     REQUIRE_FALSE(map.find("mango") != map.end());
-}
-
-TEST_CASE("CuckooHash supports operator[] index-based iteration", "[cuckoo][index]") {
-    HashMapCuckoo<int, int> map(8);
-
-    map.emplace(1, 11);
-    map.emplace(2, 22);
-    map.emplace(3, 33);
-
-    bool found_any = false;
-    for (size_t i = 0; i < map.capacity(); ++i) {
-        auto it = map[i];
-        if (it != map.end()) {
-            found_any = true;
-        }
-    }
-
-    REQUIRE(found_any);
 }

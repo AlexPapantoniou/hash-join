@@ -13,6 +13,7 @@ size_t mix_hash(size_t i) noexcept {
     return i;
 }
 
+// Test that elements are inserted within the neighbourhood they hash to
 template<typename Key, typename Value>
 bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsigned int hop_length) {
     std::hash<Key> hasher;
@@ -30,6 +31,7 @@ bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsi
     return false;
 }
 
+// Test that simple insertions work and the keys are found successfully 
 TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
     HashMapHopscotch<int, std::string> map(8);
 
@@ -54,12 +56,13 @@ TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
     REQUIRE(it->second == "two");
 
     auto not_found = map.find(10);
-    REQUIRE(not_found == map.end());
+    REQUIRE(not_found == map.end()); //key '10' shouldn't exist
 }
 
+// Test collisions
 TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap][collisions]") {
-    constexpr unsigned int hop_len = 4;
     HashMapHopscotch<int, std::string> map(8);
+    unsigned int hop_len = map.neighbours_size();
 
     std::vector<int> keys = { 0, 8, 16, 24, 32 };
 
@@ -88,9 +91,10 @@ TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap
     }
 }
 
+// Insert elements and test that they are placed correctly within their hop neighborhood
 TEST_CASE("HashMapHopscotch ensures keys stay within hop neighborhood", "[hashmap][collision]") {
-    constexpr unsigned int hop_length = 4;
     HashMapHopscotch<int, std::string> map(7);
+    unsigned int hop_length = map.neighbours_size();
 
     REQUIRE(map.capacity() == 8);
 
@@ -98,21 +102,26 @@ TEST_CASE("HashMapHopscotch ensures keys stay within hop neighborhood", "[hashma
         REQUIRE(map.emplace(i, "val" + std::to_string(i)));
     }
 
+    REQUIRE(map.size() == 20);
+    REQUIRE(map.capacity() > 8);
+
     for (int i = 0; i < 20; i++) {
         REQUIRE(is_within_hop_range(map, i, hop_length));
     }
 }
 
-TEST_CASE("HashMapHopscotch rehashes correctly when load factor exceeds 0.7", "[hashmap][rehash]") {
+// Test proper rehashing
+TEST_CASE("HashMapHopscotch rehashes correctly when load factor exceeds 0.75", "[hashmap][rehash]") {
     HashMapHopscotch<size_t, size_t> map(4);
-    size_t old_capacity = map.capacity();
+
+    REQUIRE(map.capacity() == 4);
 
     for (size_t i = 0; i < 10; i++) {
         map.emplace(i, i * 10);
     }
 
     REQUIRE(map.size() == 10);
-    REQUIRE(map.capacity() > old_capacity);
+    REQUIRE(map.capacity() == 16);
 
     for (size_t i = 0; i < 10; i++) {
         auto it = map.find(i);
@@ -121,6 +130,7 @@ TEST_CASE("HashMapHopscotch rehashes correctly when load factor exceeds 0.7", "[
     }
 }
 
+// Test that hash map works with other data types of keys
 TEST_CASE("HashMapHopscotch supports string keys", "[hashmap][string]") {
     HashMapHopscotch<std::string, std::vector<size_t>> map;
 
