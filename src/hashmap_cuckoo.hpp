@@ -1,16 +1,6 @@
 #pragma once
 
-#include <functional>
-#include <utility>
-#include <algorithm>
-#include <iterator>
-#include <cstddef>
-#include <optional>
-#include <vector>
-#include <memory>
-
-#include <iostream>
-
+// The 2 hashers for cuckoo hashing
 template<typename Key>
 struct CuckooHashers {
     std::hash<Key> hasher;
@@ -19,13 +9,15 @@ struct CuckooHashers {
         return hasher(key);
     }
 
-    static size_t mix_hash(size_t h) noexcept {
-        h ^= (h >> 33);
-        h *= 0xff51afd7ed558ccdULL;
-        h ^= (h >> 33);
-        h *= 0xc4ceb9fe1a85ec53ULL;
-        h ^= (h >> 33);
-        return h;
+    // Mix the hash value to improve distribution
+    static size_t mix_hash(size_t i) noexcept {
+        i += 1ull;
+        i ^= i >> 33ull;
+        i *= 0xff51afd7ed558ccdull;
+        i ^= i >> 33ull;
+        i *= 0xc4ceb9fe1a85ec53ull;
+        i ^= i >> 33ull;
+        return i;
     }
 
     inline size_t h2(const Key& key) const noexcept {
@@ -40,16 +32,19 @@ private:
         Key key;
         Value value;
     };
+
     size_t _capacity;
     std::vector<std::optional<Node>> buckets1;
     std::vector<std::optional<Node>> buckets2;
     size_t _size;
     CuckooHashers<Key> hashers;
 
+    // Helper function for faster "%" operations (x % capacity == x & mask())
     inline size_t mask() const noexcept {
         return _capacity - 1;
     }
 
+    // Compute the next power of two (used for setting the capacity)
     static size_t next_power_of_two(size_t n) noexcept {
         size_t p = 1;
         while (p < n) p <<= 1;
@@ -61,6 +56,7 @@ private:
         std::vector<std::optional<Node>> old_buckets2 = std::move(buckets2);
         size_t old_capacity = _capacity;
 
+        // Keep trying to rehash until it's successful
         while (true) {
             _capacity <<= 1;
             buckets1.assign(_capacity, std::nullopt);
@@ -70,6 +66,7 @@ private:
             const size_t cap_mask = mask();
             bool all_ok = true;
 
+            // Rehash using the second hash function to avoid recursive rehashes that might result in data loss
             for (size_t i = 0; i < old_capacity; i++) {
                 auto& bucket = old_buckets1[i];
                 if (bucket.has_value()) {
@@ -87,6 +84,7 @@ private:
                 }
             }
 
+            // Finish the rehash only if all elements were inserted successfully
             if (all_ok) {
                 return;
             }
@@ -94,7 +92,7 @@ private:
     }
 
     // Helper for rehash(): insert without triggering another rehash
-    bool emplace_no_rehash(Key key, Value value, size_t cap_mask) {
+    bool emplace_no_rehash(Key&& key, Value&& value, size_t cap_mask) {
         bool in_buckets1 = true;
         size_t loop_count = 0;
         constexpr size_t MAX_KICKS = 512;
@@ -135,6 +133,7 @@ private:
     }
 
 public:
+    // Helper iterator class for similar functionality as std::unordered_map
     class iterator {
     private:
         friend class HashMapCuckoo;
@@ -142,23 +141,28 @@ public:
         size_t index;
         bool in_buckets1;
 
+        // Find the first bucket with a value
         void advance_to_valid() {
             if (!map) {
                 return;
             }
 
             while (true) {
+                // Start from the first table (if in_buckets1 == true)
                 auto& table = in_buckets1 ? map->buckets1 : map->buckets2;
                 while (index < map->_capacity && !table[index].has_value()) {
                     index++;
                 }
+                // If we found a valid bucket return
                 if (index < map->_capacity) {
                     return;
                 }
+                // If we were in the second table and didn't find anything, switch to end() state
                 if (!in_buckets1) {
                     map = nullptr;
                     return;
                 }
+                // Switch to search the second table
                 in_buckets1 = false;
                 index = 0;
             }
@@ -171,7 +175,7 @@ public:
 
     public:
         using iterator_category = std::forward_iterator_tag;
-        using value_type = std::pair<const Key, Value>;
+        using value_type = std::pair<const Key, Value>;     // "Find" return value is a pair of Key-Value
         using difference_type = std::ptrdiff_t;
         using pointer = value_type*;
         using reference = value_type&;
@@ -180,6 +184,8 @@ public:
             : map(nullptr), index(0), in_buckets1(true) {
         }
 
+        //-----------------------------------------------------------------------------
+        // Useful operators for iterator functionality
         reference operator*() const {
             auto& node = in_buckets1 ? *map->buckets1[index] : *map->buckets2[index];
             return *reinterpret_cast<value_type*>(&node);
@@ -212,11 +218,12 @@ public:
         bool operator!=(const iterator& other) const {
             return !(*this == other);
         }
+        //-----------------------------------------------------------------------------
     };
 
 public:
     HashMapCuckoo(size_t initial_capacity = 16)
-        : _capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),
+        : _capacity(next_power_of_two(std::max<size_t>(1, initial_capacity))),  // Capacity is always a power of 2 so that mask() works
         buckets1(_capacity),
         buckets2(_capacity),
         _size(0) {
@@ -236,16 +243,16 @@ public:
         return _size == 0;
     }
 
+    // Reserve space for expected elements
     void reserve(size_t expected) {
-        if (expected == 0) {
-            expected = 1;
-        }
         _capacity = next_power_of_two(std::max<size_t>(1, static_cast<size_t>(expected * 1.5)));
         buckets1.assign(_capacity, std::nullopt);
         buckets2.assign(_capacity, std::nullopt);
     }
 
+    // Insert a new Key-Value pair
     bool emplace(const Key& key, const Value& value) {
+        // If load factor exceeds 90%, rehash
         if ((_size + 1) * 10 >= _capacity * 9) {
             rehash();
         }
@@ -253,10 +260,12 @@ public:
         Key cur_key = key;
         Value cur_value = value;
 
+        // Try to insert without rehashing
         if (emplace_no_rehash(std::move(cur_key), std::move(cur_value), mask())) {
             return true;
         }
 
+        // If it fails, repeatedly rehash and try again
         while (true) {
             rehash();
             cur_key = key;
@@ -266,14 +275,16 @@ public:
             }
         }
 
-        return false;
+        return false;   // Unreachable
     }
 
+    // Move version of emplace to avoid copies for time optimization (used in rehashing)
     bool emplace(Key&& key, Value&& value) {
         if ((_size + 1) * 10 >= _capacity * 9) {
             rehash();
         }
 
+        // Move keys and values to avoid copies
         Key cur_key = std::move(key);
         Value cur_value = std::move(value);
 
@@ -291,6 +302,7 @@ public:
         }
     }
 
+    // Search the only 2 positions in the tables in which the key may be in
     iterator find(const Key& key) {
         const size_t cap_mask = mask();
         size_t index1 = hashers.h1(key) & cap_mask;
@@ -313,6 +325,7 @@ public:
         return iterator(nullptr, _capacity, true);
     }
 
+    // Useful operator for testing
     template<typename Index>
     iterator operator[](Index index) {
         size_t i = static_cast<size_t>(index);
@@ -328,31 +341,6 @@ public:
         }
 
         return end();
-    }
-
-    void debug_dump(const std::string& label = "") const {
-        std::cout << "\n=== Cuckoo HashMap Dump";
-        if (!label.empty()) std::cout << " (" << label << ")";
-        std::cout << " ===\n";
-        std::cout << "Capacity: " << _capacity << ", Size: " << _size << "\n";
-
-        std::cout << "Table 1:\n";
-        for (size_t i = 0; i < _capacity; ++i) {
-            if (buckets1[i].has_value()) {
-                const auto& n = *buckets1[i];
-                std::cout << "  [" << i << "] key=" << n.key << "\n";
-            }
-        }
-
-        std::cout << "Table 2:\n";
-        for (size_t i = 0; i < _capacity; ++i) {
-            if (buckets2[i].has_value()) {
-                const auto& n = *buckets2[i];
-                std::cout << "  [" << i << "] key=" << n.key << "\n";
-            }
-        }
-
-        std::cout << "=============================\n";
     }
 
 };

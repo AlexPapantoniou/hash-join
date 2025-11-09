@@ -2,22 +2,24 @@
 #include <plan.h>
 #include <table.h>
 
-#include <cmath>
-
 #if defined(HASH_ROBINHOOD)
 #include "hashmap_robinhood.hpp"
+#define LOAD_FACTOR 0.75
 template<typename Key, typename Value>
 using HashMap = HashMapRobinhood<Key, Value>;
 #elif defined(HASH_HOPSCOTCH)
 #include "hashmap_hopscotch.hpp"
+#define LOAD_FACTOR 0.75
 template<typename Key, typename Value>
 using HashMap = HashMapHopscotch<Key, Value>;
 #elif defined(HASH_CUCKOO)
 #include "hashmap_cuckoo.hpp"
+#define LOAD_FACTOR 0.90
 template<typename Key, typename Value>
 using HashMap = HashMapCuckoo<Key, Value>;
 #elif defined(HASH_STANDARD)
 #include <unordered_map>
+#define LOAD_FACTOR 0.75
 template<typename Key, typename Value>
 using HashMap = std::unordered_map<Key, Value>;
 #endif
@@ -41,7 +43,7 @@ namespace Contest {
             namespace views = ranges::views;
             size_t build_rows = build_left ? left.size() : right.size();
             HashMap<T, std::vector<size_t>> hash_map;
-            hash_map.reserve(static_cast<size_t>(std::ceil(build_rows / 0.75)));
+            hash_map.reserve(static_cast<size_t>(build_rows / LOAD_FACTOR));    // Reserve enough capacity for the amout of elements to be inserted to avoid rehashes
             if (build_left) {
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
