@@ -56,7 +56,7 @@ TEST_CASE("HashMapCuckoo basic insertion and lookup", "[hashmap]") {
 TEST_CASE("HashMapCuckoo rehashes correctly when load factor exceeds 0.9", "[hashmap][rehash]") {
     HashMapCuckoo<size_t, size_t> map(3);
 
-    
+
     size_t initial_capacity = map.capacity();
     REQUIRE(initial_capacity == 4);
 
@@ -75,12 +75,35 @@ TEST_CASE("HashMapCuckoo rehashes correctly when load factor exceeds 0.9", "[has
     }
 }
 
+// Test collision handling and increment operators
+TEST_CASE("HashMapCuckoo handles collisions through cuckoo hashing", "[hashmap][collision]") {
+    HashMapCuckoo<size_t, size_t> map(8);
+
+    REQUIRE(map.emplace(78, 78));   // buckets1[6]
+    REQUIRE(map.emplace(7, 7));     // buckets1[7]
+    REQUIRE(map.emplace(6, 6));     // 78 -> buckets2[0], 6 -> buckets1[6]
+
+    auto it6 = map.find(6);
+    REQUIRE(it6 != map.end());
+
+    auto it7 = map.find(7);
+    REQUIRE(it7 != map.end());
+
+    auto it78 = map.find(78);
+    REQUIRE(it78 != map.end());
+
+    // Test increment operators
+    REQUIRE((++it7)->first == 78);   // 7 is in the last spot of buckets1, next is first spot of buckets2 (78)
+    REQUIRE((it6++)->first == 6);
+    REQUIRE(it6->first == 7);
+}
+
 // Test that hash map works with other data types of keys
 TEST_CASE("HashMapCuckoo supports string keys", "[hashmap][string]") {
     HashMapCuckoo<std::string, std::vector<size_t>> map;
 
     map.emplace("apple", { 1 });
-    map.emplace("banana", { 2, 3});
+    map.emplace("banana", { 2, 3 });
     map.emplace("cherry", { 4 });
 
     REQUIRE(map.size() == 3);

@@ -31,7 +31,7 @@ bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsi
     return false;
 }
 
-// Test that simple insertions work and the keys are found successfully 
+// Test that simple insertions work and the keys are found successfully and increment operators work
 TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
     HashMapHopscotch<int, std::string> map(8);
 
@@ -45,18 +45,29 @@ TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
     REQUIRE_FALSE(map.empty());
     REQUIRE(map.size() == 3);
 
-    auto it = map.find(1);
-    REQUIRE(it != map.end());
-    REQUIRE(it->first == 1);
-    REQUIRE(it->second == "one");
+    auto it1 = map.find(1);
+    REQUIRE(it1 != map.end());
+    REQUIRE(it1->first == 1);
+    REQUIRE(it1->second == "one");
 
-    it = map.find(2);
-    REQUIRE(it != map.end());
-    REQUIRE(it->first == 2);
-    REQUIRE(it->second == "two");
+    auto it2 = map.find(2);
+    REQUIRE(it2 != map.end());
+    REQUIRE(it2->first == 2);
+    REQUIRE(it2->second == "two");
+
+    auto it3 = map.find(3);
+    REQUIRE(it3 != map.end());
+    REQUIRE(it3->first == 3);
+    REQUIRE(it3->second == "three");
 
     auto not_found = map.find(10);
     REQUIRE(not_found == map.end()); //key '10' shouldn't exist
+
+    // Test increment operators
+    REQUIRE((++it3)->first == 2);
+    REQUIRE((it2++)->first == 2);
+    REQUIRE(it2->first == 1);
+    REQUIRE((++it1) == map.end());
 }
 
 // Test collisions
@@ -64,6 +75,7 @@ TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap
     HashMapHopscotch<int, std::string> map(8);
     unsigned int hop_len = map.neighbours_size();
 
+    // keys are hashed at positions 4, 5, 6, 5, 7 respectively
     std::vector<int> keys = { 0, 8, 16, 24, 32 };
 
     for (int key : keys)

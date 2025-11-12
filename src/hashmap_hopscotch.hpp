@@ -120,7 +120,7 @@ public:
 
         iterator operator++(int) {
             iterator temp = *this;
-            (*this)++;
+            ++(*this);
             return temp;
         }
 

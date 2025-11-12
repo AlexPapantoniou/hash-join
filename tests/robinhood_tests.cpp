@@ -32,26 +32,28 @@ TEST_CASE("HashMapRobinhood basic insertion and lookup", "[hashmap]") {
     REQUIRE(val40 == map.end());    // Key '40' shouldn't exist
 }
 
-// Test that when collisions happen, each key gets moved to the expected position
+// Test that when collisions happen, each key gets moved to the expected position and increment operators work
 TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashmap][collision][hashfunction]") {
     HashMapRobinhood<size_t, std::vector<size_t>> map(8);
 
-    REQUIRE(map.emplace(11, std::vector<size_t>{11}));
+    REQUIRE(map.emplace(11, std::vector<size_t>{11}));  // buckets[5]
     auto key11 = map[5];     // Search keys via exact position in the hash map
     REQUIRE(key11 != map.end());
     REQUIRE(key11->first == 11);
 
-    REQUIRE(map.emplace(10, std::vector<size_t>{10}));
+    REQUIRE(map.emplace(10, std::vector<size_t>{10}));  // buckets[4]
     auto key10 = map[4];
     REQUIRE(key10 != map.end());
     REQUIRE(key10->first == 10);
 
-    REQUIRE(map.emplace(12, std::vector<size_t>{12}));
+    REQUIRE(map.emplace(12, std::vector<size_t>{12}));  // buckets[5] is occupied -> buckets[6]
     auto key12 = map[6];
     REQUIRE(key12 != map.end());
     REQUIRE(key12->first == 12);
 
+    // buckets[4] is occupied -> buckets[5], kicks 11, 11 kicks 12, 12 moves to buckets[7]
     REQUIRE(map.emplace(13, std::vector<size_t>{13}));
+
     // Check that each key is placed at the correct spot
     key10 = map[4];
     auto key13 = map[5];
@@ -65,6 +67,11 @@ TEST_CASE("HashMapRobinhood handles collisions via Robin Hood hashing", "[hashma
     REQUIRE(key13->first == 13);
     REQUIRE(key11->first == 11);
     REQUIRE(key12->first == 12);
+
+    // Test increment operators
+    REQUIRE((++key10)->second == std::vector<size_t>{13});
+    REQUIRE(key12++ != map.end());
+    REQUIRE(key12 == map.end());
 }
 
 // Test proper rehashing
