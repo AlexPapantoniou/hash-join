@@ -95,6 +95,59 @@ add_executable(robinhood_tests tests/robinhood_tests.cpp)
 add_executable(hopscotch_tests tests/hopscotch_tests.cpp)
 add_executable(cuckoo_tests tests/cuckoo_tests.cpp)
 
+#compile execute.cpp with each algorithm
+add_custom_target(robinhood
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=robinhood -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}  # ensures fast runs in source dir
+)
+
+add_custom_target(hopscotch
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=hopscotch -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(cuckoo
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=cuckoo -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(unordered
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=standard -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+#tests
+add_custom_target(run_robinhood
+    COMMAND cmake --build build --target robinhood_tests -j 3
+    COMMAND ./build/robinhood_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_hopscotch
+    COMMAND cmake --build build --target hopscotch_tests -j 3
+    COMMAND ./build/hopscotch_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_cuckoo
+    COMMAND cmake --build build --target cuckoo_tests -j 3
+    COMMAND ./build/cuckoo_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_unit
+    COMMAND cmake --build build --target unit_tests -j 3
+    COMMAND ./build/unit_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+#queries
+add_custom_target(queries
+    COMMAND $<TARGET_FILE:fast> "${CMAKE_SOURCE_DIR}/plans.json"
+    DEPENDS fast
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 # For all executables
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_compile_definitions(run PRIVATE _CRT_SECURE_NO_WARNINGS)
