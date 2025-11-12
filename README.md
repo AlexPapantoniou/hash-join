@@ -5,25 +5,22 @@
 Οδηγίες για build/run (αφου φτιάχτει η cache):
 a. Για γενικά unit_tests και queries:
 
-1. cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=<algorithm_name> -Wno-dev
+1. cmake --build build --target <algorithm_name>
    όπου algorithm_name τον αλγόριθμο κατακερματιμού που θα χρησιμοποιήσουμε:
-   i. "standard": std::unordered_map
+   i. "unordered": std::unordered_map
    ii. "robinhood": robinhood
    iii. "hopscotch": hopscotch
    iv. "cuckoo": cuckoo
-2. Για unit_tests: cmake --build build --target unit_tests -j 3
-   Για queries: cmake --build build -- -j 3 fast
-3. Για unit_tests: ./build/unit_tests
-   Για queries: ./build/fast plans.json
+2. Για unit_tests: cmake --build build --target run_unit
+   Για queries: cmake --build build --target queries
 
 b. Για στοχευμένα unit_tests του κάθε αλγορίθμου:
 
-1. cmake --build build --target <algorithm_name>\_tests -j 3
+   cmake --build build --target run_<algorithm_name>
    όπου algorithm_name τον αλγόριθμο κατακερματιμού που θέλουμε να τεστάρουμε:
    i. "robinhood": robinhood
    ii. "hopscotch": hopscotch
    iii. "cuckoo": cuckoo
-2. ./build/<algorithm_name>\_tests
 
 Χρόνοι εκτέλεσης των queries:
 
