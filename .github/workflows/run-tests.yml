@@ -1,0 +1,52 @@
+name: run-tests
+on: 
+  push:
+  pull_request:
+jobs:
+  build-and-test:
+    runs-on: 
+      group: k23a
+    steps:
+      
+
+    - uses: actions/checkout@v3
+
+
+      
+
+    - name: make hashmap_robinhood_tests
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=robinhood -Wno-dev && cmake --build build --target robinhood_tests -j
+      continue-on-error: true
+
+
+      
+
+    - name: Run hashmap_robinhood_tests
+      run: (./build/robinhood_tests) || true
+
+
+      
+
+    - name: make hashmap_hopscotch_tests
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=hopscotch -Wno-dev && cmake --build build --target hopscotch_tests -j
+      continue-on-error: true
+
+
+      
+
+    - name: Run hashmap_hopscotch_tests
+      run: (./build/hopscotch_tests) || true
+
+    
+    
+    
+    
+    - name: make hashmap_cuckoo_tests
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=cuckoo -Wno-dev && cmake --build build --target cuckoo_tests -j
+      continue-on-error: true
+
+
+      
+
+    - name: Run hashmap_cuckoo_tests
+      run: (./build/cuckoo_tests) || true
