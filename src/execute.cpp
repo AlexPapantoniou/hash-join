@@ -24,9 +24,14 @@ template<typename Key, typename Value>
 using HashMap = std::unordered_map<Key, Value>;
 #endif
 
+#include "../include/columnar_utils.hpp"
+
+//std::variant is like union in c
+//std::monostate is a null type for variant
+
 namespace Contest {
 
-    using ExecuteResult = std::vector<std::vector<Data>>;
+    using ExecuteResult = std::vector<std::vector<value_t>>;
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx);
 
@@ -43,7 +48,7 @@ namespace Contest {
             namespace views = ranges::views;
             size_t build_rows = build_left ? left.size() : right.size();
             HashMap<T, std::vector<size_t>> hash_map;
-            hash_map.reserve(static_cast<size_t>(build_rows / LOAD_FACTOR));    // Reserve enough capacity for the amout of elements to be inserted to avoid rehashes
+            hash_map.reserve(static_cast<size_t>(build_rows / LOAD_FACTOR));    // Reserve enough capacity for the amount of elements to be inserted to avoid rehashes
             if (build_left) {
                 for (auto&& [idx, record] : left | views::enumerate) {
                     std::visit(
@@ -142,7 +147,6 @@ namespace Contest {
                         left_record[left_col]);
                 }
             }
-            // hash_map.debug_dump();
         }
     };
 
@@ -157,7 +161,7 @@ namespace Contest {
         auto& right_types = right_node.output_attrs;
         auto                           left = execute_impl(plan, left_idx);
         auto                           right = execute_impl(plan, right_idx);
-        std::vector<std::vector<Data>> results;
+        std::vector<std::vector<value_t>> results;
 
         JoinAlgorithm join_algorithm{ .build_left = join.build_left,
             .left = left,
@@ -191,7 +195,8 @@ namespace Contest {
         const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
         auto                           table_id = scan.base_table_id;
         auto& input = plan.inputs[table_id];
-        return Table::copy_scan(input, output_attrs);
+        return ColumnarUtils::my_copy(input, output_attrs, table_id);
+        // return Table::copy_scan(input, output_attrs);
     }
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
@@ -199,10 +204,10 @@ namespace Contest {
         return std::visit(
             [&](const auto& value) {
                 using T = std::decay_t<decltype(value)>;
-                if constexpr (std::is_same_v<T, JoinNode>) {
+                if constexpr (std::is_same_v<T, JoinNode>) {     //if T is a join Node
                     return execute_hash_join(plan, value, node.output_attrs);
                 }
-                else {
+                else {  //if T is a SCAN Node
                     return execute_scan(plan, value, node.output_attrs);
                 }
             },
