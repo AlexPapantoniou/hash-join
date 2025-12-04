@@ -211,9 +211,11 @@ namespace Contest {
             | views::transform([](const auto& v) { return std::get<1>(v); })
             | ranges::to<std::vector<DataType>>();
 
-        std::vector<std::vector<Data>> materialized = ColumnarUtils::materialize(plan, ret, ret_types);
-        Table table{ std::move(materialized), std::move(ret_types) };
-        return table.to_columnar();
+        ColumnarUtils::MyTable my_table{ std::move(ret), std::move(ret_types) };
+        return my_table.from_value_t_to_columnar(std::move(plan));
+        // std::vector<std::vector<Data>> materialized = ColumnarUtils::materialize(plan, ret, ret_types);
+        // Table table{ std::move(materialized), std::move(ret_types) };
+        // return table.to_columnar();
     }
 
     void* build_context() {

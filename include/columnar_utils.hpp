@@ -20,7 +20,7 @@
  - For STRING we pack a compact str_rep_t into payload.
  - We intentionally only support INT32, VARCHAR and NULL in this compact value_t,
    because INT64/FP64 cannot be represented losslessly together with a 3-bit tag
-   inside 8 bytes without more complicated encoding (and your workload uses int32 join keys).
+   inside 8 bytes without more complicated encoding.
 */
 
 // Helper namespace 
@@ -32,9 +32,9 @@ namespace ColumnarUtils {
     constexpr uint8_t KIND_STRING = 2;
 
     // ---- str_rep_t (fits inside 61 payload bits) ----
-    // Layout chosen to match typical constraints you described:
-    //  - table_id: 5 bits  (0..31)   (you said max table id <=16)
-    //  - column_id: 3 bits (0..7)    (you said max column id <=6)
+    // Layout chosen to match typical constraints:
+    //  - table_id: 5 bits  (0..31)   (max table id <=16)
+    //  - column_id: 3 bits (0..7)    (max column id <=6)
     //  - page_id: 20 bits (0..2^20-1)
     //  - offset: 16 bits  (0..65535) fits uint16_t offsets in page
     //
@@ -360,5 +360,170 @@ namespace ColumnarUtils {
         }
         return results;
     }
+
+    void set_bitmap(std::vector<int8_t>& bitmap, uint16_t idx) {
+        while (bitmap.size() < idx / 8 + 1) {
+            bitmap.emplace_back(0);
+        }
+        auto byte_idx = idx / 8;
+        auto bit = idx % 8;
+        bitmap[byte_idx] |= (1u << bit);
+    }
+
+    void unset_bitmap(std::vector<int8_t>& bitmap, uint16_t idx) {
+        while (bitmap.size() < idx / 8 + 1) {
+            bitmap.emplace_back(0);
+        }
+        auto byte_idx = idx / 8;
+        auto bit = idx % 8;
+        bitmap[byte_idx] &= ~(1u << bit);
+    }
+
+    // Convert vector<vector<value_t>> -> ColumnarTable in one step
+    ColumnarTable from_value_t_to_columnar(const Plan& plan, const std::vector<std::vector<value_t>>& rows, const std::vector<DataType>& types) {
+        auto& table = rows;
+        auto& data_types = types;
+        namespace views = ranges::views;
+        ColumnarTable ret;
+        ret.num_rows = table.size();
+        for (auto [col_idx, data_type] : data_types | views::enumerate) {
+            ret.columns.emplace_back(data_type);
+            auto& column = ret.columns.back();
+            switch (data_type) {
+            case DataType::INT32: {
+                uint16_t num_rows = 0;
+                std::vector<int32_t> data;
+                std::vector<int8_t> bitmap;
+                data.reserve(2048);
+                bitmap.reserve(256);
+                auto save_page = [&column, &num_rows, &data, &bitmap]() {
+                    auto* page = column.new_page()->data;
+                    *reinterpret_cast<uint16_t*>(page) = num_rows;
+                    *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(data.size());
+                    memcpy(page + 4, data.data(), data.size() * 4);
+                    memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
+                    num_rows = 0;
+                    data.clear();
+                    bitmap.clear();
+                    };
+                for (auto& record : table) {
+                    const auto& value = record[col_idx];
+                    if (value.is_null()) {
+                        if (4 + (data.size()) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
+                            save_page();
+                        }
+                        unset_bitmap(bitmap, num_rows);
+                        num_rows++;
+                    }
+                    else if (value.kind() == KIND_INT32) {
+                        int32_t int_value = value.as_i32();
+                        if (4 + (data.size() + 1) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
+                            save_page();
+                        }
+                        set_bitmap(bitmap, num_rows);
+                        data.emplace_back(int_value);
+                        num_rows++;
+                    }
+                    else {
+                        throw std::runtime_error("not int32 or null");
+                    }
+                }
+                if (num_rows != 0) {
+                    save_page();
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                uint16_t num_rows = 0;
+                std::vector<char>     data;
+                std::vector<uint16_t> offsets;
+                std::vector<int8_t>  bitmap;
+                data.reserve(8192);
+                offsets.reserve(4096);
+                bitmap.reserve(512);
+                auto save_long_string = [&column](std::string_view data) {
+                    size_t offset = 0;
+                    auto first_page = true;
+                    while (offset < data.size()) {
+                        auto* page = column.new_page()->data;
+                        if (first_page) {
+                            *reinterpret_cast<uint16_t*>(page) = 0xffff;
+                            first_page = false;
+                        }
+                        else {
+                            *reinterpret_cast<uint16_t*>(page) = 0xfffe;
+                        }
+                        auto page_data_len = std::min(data.size() - offset, PAGE_SIZE - 4);
+                        *reinterpret_cast<uint16_t*>(page + 2) = page_data_len;
+                        memcpy(page + 4, data.data() + offset, page_data_len);
+                        offset += page_data_len;
+                    }
+                    };
+                auto save_page = [&column, &num_rows, &data, &offsets, &bitmap]() {
+                    auto* page = column.new_page()->data;
+                    *reinterpret_cast<uint16_t*>(page) = num_rows;
+                    *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(offsets.size());
+                    memcpy(page + 4, offsets.data(), offsets.size() * 2);
+                    memcpy(page + 4 + offsets.size() * 2, data.data(), data.size());
+                    memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
+                    num_rows = 0;
+                    data.clear();
+                    offsets.clear();
+                    bitmap.clear();
+                    };
+                for (auto& record : table) {
+                    const auto& value = record[col_idx];
+                    if (value.is_null()) {
+                        if (4 + offsets.size() * 2 + data.size() + (num_rows / 8) + 1 > PAGE_SIZE) {
+                            save_page();
+                        }
+                        unset_bitmap(bitmap, num_rows);
+                        num_rows++;
+                    }
+                    else if (value.kind() == KIND_STRING) {
+                        std::string s = string_from_rep(plan, value.as_str_rep());
+                        if (s.size() > PAGE_SIZE - 7) {
+                            if (num_rows > 0) {
+                                save_page();
+                            }
+                            save_long_string(s);
+                        }
+                        else {
+                            if (4 + (offsets.size() + 1) * 2 + (data.size() + s.size()) + (num_rows / 8 + 1) > PAGE_SIZE) {
+                                save_page();
+                            }
+                            set_bitmap(bitmap, num_rows);
+                            data.insert(data.end(), s.begin(), s.end());
+                            offsets.emplace_back(data.size());
+                            num_rows++;
+                        }
+                    }
+                    else {
+                        throw std::runtime_error("not string or null");
+                    }
+                }
+                if (num_rows != 0) {
+                    save_page();
+                }
+                break;
+            }
+            }
+        }
+
+        return ret;
+    }
+
+    struct MyTable {
+        std::vector<std::vector<value_t>> rows;
+        std::vector<DataType>            types;
+
+        MyTable(std::vector<std::vector<value_t>> r, std::vector<DataType> t)
+            : rows(std::move(r)), types(std::move(t)) {
+        }
+
+        ColumnarTable from_value_t_to_columnar(const Plan& plan) {
+            return ColumnarUtils::from_value_t_to_columnar(plan, rows, types);
+        }
+    };
 
 } // namespace ColumnarUtils
