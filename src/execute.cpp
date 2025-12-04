@@ -25,17 +25,16 @@ using HashMap = std::unordered_map<Key, Value>;
 #endif
 
 #include "../include/columnar_utils.hpp"
-
-//std::variant is like union in c
-//std::monostate is a null type for variant
+// #include <iostream>
+#include <stdio.h>
 
 namespace Contest {
 
-    using ExecuteResult = std::vector<std::vector<value_t>>;
+    using ExecuteResult = std::vector<std::vector<ColumnarUtils::value_t>>;
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx);
 
-    struct JoinAlgorithm {
+    struct MyJoinAlgorithm {
         bool                                             build_left;
         ExecuteResult& left;
         ExecuteResult& right;
@@ -43,108 +42,99 @@ namespace Contest {
         size_t                                           left_col, right_col;
         const std::vector<std::tuple<size_t, DataType>>& output_attrs;
 
-        template <class T>
-        auto run() {
+        void run() {
             namespace views = ranges::views;
             size_t build_rows = build_left ? left.size() : right.size();
-            HashMap<T, std::vector<size_t>> hash_map;
-            hash_map.reserve(static_cast<size_t>(build_rows / LOAD_FACTOR));    // Reserve enough capacity for the amount of elements to be inserted to avoid rehashes
+            HashMap<int32_t, std::vector<size_t>> hash_map;
+            hash_map.reserve(static_cast<size_t>(std::max<size_t>(1, build_rows / LOAD_FACTOR)));
+
             if (build_left) {
-                for (auto&& [idx, record] : left | views::enumerate) {
-                    std::visit(
-                        [&hash_map, idx = idx](const auto& key) {
-                            using Tk = std::decay_t<decltype(key)>;
-                            if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_map.find(key); itr == hash_map.end()) {
-                                    hash_map.emplace(key, std::vector<size_t>(1, idx));
-                                }
-                                else {
-                                    itr->second.push_back(idx);
-                                }
-                            }
-                            else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                                throw std::runtime_error("wrong type of field");
-                            }
-                        },
-                        record[left_col]);
+                // build from left
+                for (size_t idx = 0; idx < left.size(); idx++) {
+                    const auto& value = left[idx][left_col];
+                    if (value.is_null()) {
+                        continue;
+                    }
+                    int32_t key = value.as_i32();
+                    auto itr = hash_map.find(key);
+                    if (itr == hash_map.end()) {
+                        hash_map.emplace(key, std::vector<size_t>{idx});
+                    }
+                    else {
+                        itr->second.push_back(idx);
+                    }
                 }
-                for (auto& right_record : right) {
-                    std::visit(
-                        [&](const auto& key) {
-                            using Tk = std::decay_t<decltype(key)>;
-                            if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_map.find(key); itr != hash_map.end()) {
-                                    for (auto left_idx : itr->second) {
-                                        auto& left_record = left[left_idx];
-                                        std::vector<Data> new_record;
-                                        new_record.reserve(output_attrs.size());
-                                        for (auto [col_idx, _] : output_attrs) {
-                                            if (col_idx < left_record.size()) {
-                                                new_record.emplace_back(left_record[col_idx]);
-                                            }
-                                            else {
-                                                new_record.emplace_back(
-                                                    right_record[col_idx - left_record.size()]);
-                                            }
-                                        }
-                                        results.emplace_back(std::move(new_record));
-                                    }
-                                }
+                // probe with right
+                for (size_t rid = 0; rid < right.size(); rid++) {
+                    const auto& value = right[rid][right_col];
+                    if (value.is_null()) {
+                        continue;
+                    }
+                    int32_t key = value.as_i32();
+                    auto itr = hash_map.find(key);
+                    if (itr == hash_map.end()) {
+                        continue;
+                    }
+                    const auto& right_record = right[rid];
+                    for (size_t left_idx : itr->second) {
+                        const auto& left_record = left[left_idx];
+                        std::vector<ColumnarUtils::value_t> new_record;
+                        new_record.reserve(output_attrs.size());
+                        // For each output slot, decide whether it refers to left or right
+                        for (auto [col_idx, _] : output_attrs) {
+                            if (col_idx < left_record.size()) {
+                                new_record.emplace_back(left_record[col_idx]);
                             }
-                            else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                                throw std::runtime_error("wrong type of field");
+                            else {
+                                new_record.emplace_back(right_record[col_idx - left_record.size()]);
                             }
-                        },
-                        right_record[right_col]);
+                        }
+                        results.emplace_back(std::move(new_record));
+                    }
                 }
             }
             else {
-                for (auto&& [idx, record] : right | views::enumerate) {
-                    std::visit(
-                        [&hash_map, idx = idx](const auto& key) {
-                            using Tk = std::decay_t<decltype(key)>;
-                            if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_map.find(key); itr == hash_map.end()) {
-                                    hash_map.emplace(key, std::vector<size_t>(1, idx));
-                                }
-                                else {
-                                    itr->second.push_back(idx);
-                                }
-                            }
-                            else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                                throw std::runtime_error("wrong type of field");
-                            }
-                        },
-                        record[right_col]);
+                // build from right
+                for (size_t idx = 0; idx < right.size(); idx++) {
+                    const auto& value = right[idx][right_col];
+                    if (value.is_null()) {
+                        continue;
+                    }
+                    int32_t key = value.as_i32();
+                    auto itr = hash_map.find(key);
+                    if (itr == hash_map.end()) {
+                        hash_map.emplace(key, std::vector<size_t>{idx});
+                    }
+                    else {
+                        itr->second.push_back(idx);
+                    }
                 }
-                for (auto& left_record : left) {
-                    std::visit(
-                        [&](const auto& key) {
-                            using Tk = std::decay_t<decltype(key)>;
-                            if constexpr (std::is_same_v<Tk, T>) {
-                                if (auto itr = hash_map.find(key); itr != hash_map.end()) {
-                                    for (auto right_idx : itr->second) {
-                                        auto& right_record = right[right_idx];
-                                        std::vector<Data> new_record;
-                                        new_record.reserve(output_attrs.size());
-                                        for (auto [col_idx, _] : output_attrs) {
-                                            if (col_idx < left_record.size()) {
-                                                new_record.emplace_back(left_record[col_idx]);
-                                            }
-                                            else {
-                                                new_record.emplace_back(
-                                                    right_record[col_idx - left_record.size()]);
-                                            }
-                                        }
-                                        results.emplace_back(std::move(new_record));
-                                    }
-                                }
+                // probe with left
+                for (size_t lid = 0; lid < left.size(); lid++) {
+                    const auto& value = left[lid][left_col];
+                    if (value.is_null()) {
+                        continue;
+                    }
+                    int32_t key = value.as_i32();
+                    auto itr = hash_map.find(key);
+                    if (itr == hash_map.end()) {
+                        continue;
+                    }
+                    const auto& left_record = left[lid];
+                    for (size_t right_idx : itr->second) {
+                        const auto& right_record = right[right_idx];
+                        std::vector<ColumnarUtils::value_t> new_record;
+                        new_record.reserve(output_attrs.size());
+                        for (auto [col_idx, _] : output_attrs) {
+                            if (col_idx < left_record.size()) {
+                                new_record.emplace_back(left_record[col_idx]);
                             }
-                            else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                                throw std::runtime_error("wrong type of field");
+                            else {
+                                new_record.emplace_back(right_record[col_idx - left_record.size()]);
                             }
-                        },
-                        left_record[left_col]);
+                        }
+                        results.emplace_back(std::move(new_record));
+                    }
                 }
             }
         }
@@ -161,9 +151,10 @@ namespace Contest {
         auto& right_types = right_node.output_attrs;
         auto                           left = execute_impl(plan, left_idx);
         auto                           right = execute_impl(plan, right_idx);
-        std::vector<std::vector<value_t>> results;
 
-        JoinAlgorithm join_algorithm{ .build_left = join.build_left,
+        std::vector<std::vector<ColumnarUtils::value_t>> results;
+
+        MyJoinAlgorithm join_algorithm{ .build_left = join.build_left,
             .left = left,
             .right = right,
             .results = results,
@@ -172,18 +163,18 @@ namespace Contest {
             .output_attrs = output_attrs };
         if (join.build_left) {
             switch (std::get<1>(left_types[join.left_attr])) {
-            case DataType::INT32:   join_algorithm.run<int32_t>(); break;
-            case DataType::INT64:   join_algorithm.run<int64_t>(); break;
-            case DataType::FP64:    join_algorithm.run<double>(); break;
-            case DataType::VARCHAR: join_algorithm.run<std::string>(); break;
+            case DataType::INT32:   join_algorithm.run(); break;
+                // case DataType::INT64:   join_algorithm.run<int64_t>(); break;
+                // case DataType::FP64:    join_algorithm.run<double>(); break;
+            // case DataType::VARCHAR: join_algorithm.run(); break;
             }
         }
         else {
             switch (std::get<1>(right_types[join.right_attr])) {
-            case DataType::INT32:   join_algorithm.run<int32_t>(); break;
-            case DataType::INT64:   join_algorithm.run<int64_t>(); break;
-            case DataType::FP64:    join_algorithm.run<double>(); break;
-            case DataType::VARCHAR: join_algorithm.run<std::string>(); break;
+            case DataType::INT32:   join_algorithm.run(); break;
+                // case DataType::INT64:   join_algorithm.run<value_t>(); break;
+                // case DataType::FP64:    join_algorithm.run<value_t>(); break;
+            // case DataType::VARCHAR: join_algorithm.run(); break;
             }
         }
 
@@ -196,7 +187,6 @@ namespace Contest {
         auto                           table_id = scan.base_table_id;
         auto& input = plan.inputs[table_id];
         return ColumnarUtils::my_copy(input, output_attrs, table_id);
-        // return Table::copy_scan(input, output_attrs);
     }
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
@@ -220,7 +210,9 @@ namespace Contest {
         auto ret_types = plan.nodes[plan.root].output_attrs
             | views::transform([](const auto& v) { return std::get<1>(v); })
             | ranges::to<std::vector<DataType>>();
-        Table table{ std::move(ret), std::move(ret_types) };
+
+        std::vector<std::vector<Data>> materialized = ColumnarUtils::materialize(plan, ret, ret_types);
+        Table table{ std::move(materialized), std::move(ret_types) };
         return table.to_columnar();
     }
 
