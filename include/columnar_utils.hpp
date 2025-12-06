@@ -64,7 +64,9 @@ namespace ColumnarUtils {
         value_t() noexcept : raw(0) {} // default NULL (kind == 0)
 
         static value_t make_null() noexcept {
-            value_t x; x.raw = 0; return x;
+            value_t x;
+            x.raw = 0;
+            return x;
         }
 
         static value_t make_int32(int32_t v) noexcept {
@@ -152,8 +154,8 @@ namespace ColumnarUtils {
             return std::string();
         }
 
-        uint16_t hdr = *reinterpret_cast<uint16_t*>(p->data);
-        if (hdr == 0xFFFF) {
+        uint16_t header = *reinterpret_cast<uint16_t*>(p->data);
+        if (header == 0xFFFF) {
             // long string: append content of this page and any following 0xFFFE pages
             std::string out;
             size_t cur = page_id;
@@ -178,7 +180,7 @@ namespace ColumnarUtils {
         }
         else {
             // short-string page: offsets array (end offsets) at data+4, char block at data+4 + non_null*2
-            uint16_t rows_in_page = hdr;
+            uint16_t rows_in_page = header;
             uint16_t offset_count = *reinterpret_cast<uint16_t*>(p->data + 2);
             if (offset_count == 0) {
                 return std::string();
@@ -235,10 +237,10 @@ namespace ColumnarUtils {
                     page_id++;
                     continue;
                 }
-                uint16_t hdr = *reinterpret_cast<uint16_t*>(p->data);
+                uint16_t header = *reinterpret_cast<uint16_t*>(p->data);
 
                 if (dt == DataType::INT32) {
-                    uint16_t rows_in_page = hdr;
+                    uint16_t rows_in_page = header;
                     const uint32_t* data_begin = reinterpret_cast<const uint32_t*>(p->data + 4);
                     const uint8_t* bitmap = reinterpret_cast<const uint8_t*>(p->data + PAGE_SIZE - ((rows_in_page + 7) / 8));
                     uint16_t data_idx = 0;
@@ -252,7 +254,7 @@ namespace ColumnarUtils {
                     }
                 }
                 else if (dt == DataType::VARCHAR) {
-                    if (hdr == 0xFFFF) {
+                    if (header == 0xFFFF) {
                         // long-string first page => one logical row
                         if (row_idx < num_rows) {
                             str_rep_t rep;
@@ -264,12 +266,12 @@ namespace ColumnarUtils {
                         }
                         row_idx++;
                     }
-                    else if (hdr == 0xFFFE) {
+                    else if (header == 0xFFFE) {
                         // continuation page: no new logical row
                     }
                     else {
                         // short-string page
-                        uint16_t rows_in_page = hdr;
+                        uint16_t rows_in_page = header;
                         uint16_t non_null = *reinterpret_cast<uint16_t*>(p->data + 2);
                         const uint16_t* offsets = reinterpret_cast<const uint16_t*>(p->data + 4);
                         const uint8_t* bitmap = reinterpret_cast<const uint8_t*>(p->data + PAGE_SIZE - ((rows_in_page + 7) / 8));
@@ -294,14 +296,14 @@ namespace ColumnarUtils {
                 else {
                     // unsupported types: keep NULL
                     // we still must advance row_idx by number of logical rows on the page
-                    if (hdr == 0xFFFF) {
+                    if (header == 0xFFFF) {
                         row_idx++;
                     }
-                    else if (hdr == 0xFFFE) {
+                    else if (header == 0xFFFE) {
                         // continuation page: no logical rows
                     }
                     else {
-                        uint16_t rows_in_page = hdr;
+                        uint16_t rows_in_page = header;
                         row_idx += rows_in_page;
                     }
                 }

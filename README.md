@@ -16,11 +16,11 @@ a. Για γενικά unit_tests και queries:
 
 b. Για στοχευμένα unit_tests του κάθε αλγορίθμου:
 
-   cmake --build build --target run_<algorithm_name>
-   όπου algorithm_name τον αλγόριθμο κατακερματιμού που θέλουμε να τεστάρουμε:
-   i. "robinhood": robinhood
-   ii. "hopscotch": hopscotch
-   iii. "cuckoo": cuckoo
+cmake --build build --target run\_<algorithm_name>
+όπου algorithm_name τον αλγόριθμο κατακερματιμού που θέλουμε να τεστάρουμε:
+i. "robinhood": robinhood
+ii. "hopscotch": hopscotch
+iii. "cuckoo": cuckoo
 
 Χρόνοι εκτέλεσης των queries:
 
@@ -48,3 +48,18 @@ cuckoo: 227000ms
 
 Με την εφαρμογή των παραπάνω, παρατηρήσαμε πτώση του χρόνου εκτέλεσης σε περίπου 230000ms σε όλες τις περιπτώσεις.
 
+Παραδοτέο 2:
+
+Χρόνοι εκτέλεσης των queries άσκηση 1.1:
+
+std::unordered_map: 155000ms
+robinhood: 144000ms
+hopscotch: 210000ms
+cuckoo: 180000ms
+
+Χρόνοι εκτέλεσης των queries άσκηση 1.2:
+
+std::unordered_map: 58000ms
+robinhood: 77000ms
+hopscotch: 98000ms
+cuckoo: 69000ms
