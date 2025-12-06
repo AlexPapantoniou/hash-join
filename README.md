@@ -57,7 +57,7 @@ robinhood: 144000ms
 hopscotch: 210000ms
 cuckoo: 180000ms
 
-Χρόνοι εκτέλεσης των queries άσκηση 1.2:
+Χρόνοι εκτέλεσης των queries άσκηση 2:
 
 std::unordered_map: 58000ms
 robinhood: 77000ms
