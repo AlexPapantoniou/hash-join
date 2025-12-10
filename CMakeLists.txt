@@ -94,6 +94,9 @@ add_executable(unit_tests ${SIGMODPC_SRC} tests/unit_tests.cpp)
 add_executable(robinhood_tests tests/robinhood_tests.cpp)
 add_executable(hopscotch_tests tests/hopscotch_tests.cpp)
 add_executable(cuckoo_tests tests/cuckoo_tests.cpp)
+add_executable(unchained_tests tests/unchained_tests.cpp)
+add_executable(columnar_utils_tests tests/columnar_utils_tests.cpp)
+add_executable(column_store_utils_tests tests/column_store_utils_tests.cpp)
 
 #compile execute.cpp with each algorithm
 add_custom_target(robinhood
@@ -116,6 +119,21 @@ add_custom_target(unordered
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
+add_custom_target(unchained
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unchained -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(columnar_utils
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(column_store_utils
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 #tests
 add_custom_target(run_robinhood
     COMMAND cmake --build build --target robinhood_tests -j 3
@@ -132,6 +150,24 @@ add_custom_target(run_hopscotch
 add_custom_target(run_cuckoo
     COMMAND cmake --build build --target cuckoo_tests -j 3
     COMMAND ./build/cuckoo_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_unchained
+    COMMAND cmake --build build --target unchained_tests -j 3
+    COMMAND ./build/unchained_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_columnar_utils
+    COMMAND cmake --build build --target columnar_utils_tests -j 3
+    COMMAND ./build/columnar_utils_tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_custom_target(run_column_store_utils
+    COMMAND cmake --build build --target column_store_utils_tests -j 3
+    COMMAND ./build/column_store_utils_tests
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
@@ -173,6 +209,9 @@ target_link_libraries(unit_tests PRIVATE re2 range-v3 fmt Catch2::Catch2WithMain
 target_link_libraries(robinhood_tests PRIVATE Catch2::Catch2WithMain fmt)
 target_link_libraries(hopscotch_tests PRIVATE Catch2::Catch2WithMain fmt)
 target_link_libraries(cuckoo_tests PRIVATE Catch2::Catch2WithMain fmt)
+target_link_libraries(unchained_tests PRIVATE Catch2::Catch2WithMain fmt)
+target_link_libraries(columnar_utils_tests PRIVATE re2 range-v3 Catch2::Catch2WithMain fmt)
+target_link_libraries(column_store_utils_tests PRIVATE re2 range-v3 Catch2::Catch2WithMain fmt)
 
 target_include_directories(run PRIVATE include)
 target_include_directories(build_database PRIVATE include)
@@ -180,8 +219,11 @@ target_include_directories(unit_tests PRIVATE include)
 target_include_directories(robinhood_tests PRIVATE include)
 target_include_directories(hopscotch_tests PRIVATE include)
 target_include_directories(cuckoo_tests PRIVATE include)
+target_include_directories(unchained_tests PRIVATE include)
+target_include_directories(columnar_utils_tests PRIVATE include)
+target_include_directories(column_store_utils_tests PRIVATE include)
 
-option(HASH_ALGORITHM "Choose hashing algorithm (robinhood, hopscotch, cuckoo)" "robinhood")
+option(HASH_ALGORITHM "Choose hashing algorithm (robinhood, hopscotch, cuckoo, unchained)" "standard")
 if(HASH_ALGORITHM STREQUAL "robinhood")
     add_compile_definitions(HASH_ROBINHOOD)
 elseif(HASH_ALGORITHM STREQUAL "hopscotch")
@@ -190,6 +232,8 @@ elseif(HASH_ALGORITHM STREQUAL "cuckoo")
     add_compile_definitions(HASH_CUCKOO)
 elseif(HASH_ALGORITHM STREQUAL "standard")
     add_compile_definitions(HASH_STANDARD)
+elseif(HASH_ALGORITHM STREQUAL "unchained")
+    add_compile_definitions(HASH_UNCHAINED)
 else()
     message(FATAL_ERROR "Unknown HASH_ALGORITHM: ${HASH_ALGORITHM}")
 endif()
