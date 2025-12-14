@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 
 #include "plan.h"
 #include "table.h"
@@ -53,6 +52,12 @@ namespace ColumnStoreUtils {
         }
 
         column_t() = default;
+
+        column_t(const column_t&) = delete;
+        column_t& operator=(const column_t&) = delete;
+
+        column_t(column_t&&) = default;
+        column_t& operator=(column_t&&) = default;
 
         column_t(DataType data_type)
             : pages()
@@ -146,7 +151,6 @@ namespace ColumnStoreUtils {
                     else if (header == 0xFFFE) {
                         // continuation page: no logical new row
                     }
-
                     else {
                         // short string page
                         uint16_t rows_in_page = header;
@@ -231,7 +235,6 @@ namespace ColumnStoreUtils {
 
         ColumnarTable ret;
         ret.num_rows = columns.empty() ? 0 : columns[0].num_rows;
-        // ret.columns.reserve(columns.size());
 
         for (size_t c = 0; c < columns.size(); c++) {
             const column_t& col = columns[c];

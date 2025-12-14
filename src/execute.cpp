@@ -22,7 +22,7 @@ using HashMap = HashMapCuckoo<Key, Value>;
 #define LOAD_FACTOR 0.65
 template<typename Key, typename Value>
 using HashMap = HashMapUnchained<Key, Value>;
-#elif defined(HASH_STANDARD)
+#elif defined(HASH_UNORDERED)
 #include <unordered_map>
 #define LOAD_FACTOR 0.75
 template<typename Key, typename Value>
@@ -31,8 +31,6 @@ using HashMap = std::unordered_map<Key, Value>;
 
 #include "../include/columnar_utils.hpp"
 #include "../include/column_store_utils.hpp"
-// #include <iostream>
-#include <stdio.h>
 
 namespace Contest {
 

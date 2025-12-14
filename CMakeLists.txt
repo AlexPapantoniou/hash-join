@@ -115,7 +115,7 @@ add_custom_target(cuckoo
 )
 
 add_custom_target(unordered
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=standard -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unordered -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
@@ -223,15 +223,15 @@ target_include_directories(unchained_tests PRIVATE include)
 target_include_directories(columnar_utils_tests PRIVATE include)
 target_include_directories(column_store_utils_tests PRIVATE include)
 
-option(HASH_ALGORITHM "Choose hashing algorithm (robinhood, hopscotch, cuckoo, unchained)" "standard")
+option(HASH_ALGORITHM "Choose hashing algorithm (robinhood, hopscotch, cuckoo, unordered, unchained)" "unordered")
 if(HASH_ALGORITHM STREQUAL "robinhood")
     add_compile_definitions(HASH_ROBINHOOD)
 elseif(HASH_ALGORITHM STREQUAL "hopscotch")
     add_compile_definitions(HASH_HOPSCOTCH)
 elseif(HASH_ALGORITHM STREQUAL "cuckoo")
     add_compile_definitions(HASH_CUCKOO)
-elseif(HASH_ALGORITHM STREQUAL "standard")
-    add_compile_definitions(HASH_STANDARD)
+elseif(HASH_ALGORITHM STREQUAL "UNORDERED")
+    add_compile_definitions(HASH_UNORDERED)
 elseif(HASH_ALGORITHM STREQUAL "unchained")
     add_compile_definitions(HASH_UNCHAINED)
 else()
