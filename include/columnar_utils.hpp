@@ -336,22 +336,8 @@ namespace ColumnarUtils {
                 }
                 else if (dt == DataType::VARCHAR && v.kind() == KIND_STRING) {
                     str_rep_t rep = v.as_str_rep();
-                    try {
-                        std::string s = string_from_rep(plan, rep);
-                        if (s.empty()) {
-                            // Log warning for suspicious empty string from failed lookup
-                            std::cerr << "WARNING: materialize: empty string from string_from_rep at row "
-                                << r << " col " << c << " (table_id=" << rep.table_id
-                                << ", col_id=" << rep.column_id << ", page_id=" << rep.page_id
-                                << ", offset=" << rep.offset << ")" << std::endl;
-                        }
-                        results[r][c] = std::move(s);
-                    }
-                    catch (const std::exception& e) {
-                        std::cerr << "ERROR: materialize: string_from_rep failed at row " << r
-                            << " col " << c << ": " << e.what() << std::endl;
-                        results[r][c] = std::monostate{};
-                    }
+                    std::string s = string_from_rep(plan, rep);
+                    results[r][c] = std::move(s);
                 }
                 else {
                     // fallback: try reasonable conversions or set null
