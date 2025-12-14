@@ -166,7 +166,7 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[columnar_u
     std::string str1 = string_from_rep(plan, r1);
 
     REQUIRE(str0 == "foo"); // dummy check to ensure s0 available
-    REQUIRE(str1 == "hello"); // dummy check to ensure s0 available
+    REQUIRE(str1 == "hello"); // dummy check to ensure s1 available
 }
 
 ColumnarTable create_int_column(ColumnarTable table) {
@@ -188,9 +188,9 @@ ColumnarTable create_int_column(ColumnarTable table) {
     // build bitmap at page end: bitmap size = ceil(rows_in_page/8) = 1 byte
     uint8_t bitmap_byte = 0;
     // set non-null for rows 0 and 1 (for example)
-    bitmap_byte |= (1u << 0); // row 0 non-null
+    bitmap_byte |= (1u << 0); // row0 non-null
     // row1 null
-    bitmap_byte |= (1u << 1); // row2 non-null
+    bitmap_byte |= (1u << 1); // row1 non-null
     // write bitmap
     memcpy(p->data + PAGE_SIZE - 1, &bitmap_byte, 1);
 
@@ -214,7 +214,6 @@ ColumnarTable create_varchar_column(ColumnarTable table) {
     // we'll store "foo" (3 bytes) and "hello" (5 bytes) concatenated
     const char* s1 = "foo";
     const char* s2 = "hello";
-    size_t dpos = 4;
     uint16_t off1 = static_cast<uint16_t>(strlen(s1));       // 3
     uint16_t off2 = static_cast<uint16_t>(strlen(s1) + strlen(s2)); // 8
 
