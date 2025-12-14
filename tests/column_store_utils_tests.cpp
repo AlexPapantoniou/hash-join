@@ -69,7 +69,7 @@ TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]")
     // build bitmap at page end: bitmap size = ceil(rows_in_page/8) = 1 byte
     uint8_t bitmap_byte = 0;
     // set non-null for rows 0 and 2 (for example)
-    bitmap_byte |= (1u << 0); // row 0 non-null
+    bitmap_byte |= (1u << 0); // row0 non-null
     // row1 null
     bitmap_byte |= (1u << 2); // row2 non-null
     // write bitmap
@@ -80,7 +80,7 @@ TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]")
     // Prepare output attrs: single column 0, DataType::INT32
     std::vector<std::tuple<size_t, DataType>> output_attrs = { {0, DataType::INT32} };
 
-    auto res = my_copy(table, output_attrs, /*table_id=*/0);
+    auto res = my_copy(table, output_attrs, 0);
 
     REQUIRE(res.size() == 1);
     REQUIRE(res[0].num_rows == rows_in_page);
@@ -120,7 +120,6 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_sto
     // we'll store "foo" (3 bytes) and "hello" (5 bytes) concatenated
     const char* s1 = "foo";
     const char* s2 = "hello";
-    size_t dpos = 4;
     uint16_t off1 = static_cast<uint16_t>(strlen(s1));       // 3
     uint16_t off2 = static_cast<uint16_t>(strlen(s1) + strlen(s2)); // 8
 
@@ -144,7 +143,7 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_sto
     // prepare output attrs (single column)
     std::vector<std::tuple<size_t, DataType>> output_attrs = { {0, DataType::VARCHAR} };
 
-    auto res = my_copy(plan.inputs[0], output_attrs, /*table_id=*/0);
+    auto res = my_copy(plan.inputs[0], output_attrs, 0);
 
     REQUIRE(res.size() == 1);
     REQUIRE(res[0].num_rows == rows_in_page);
@@ -168,7 +167,7 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_sto
     std::string str1 = string_from_rep(plan, r1);
 
     REQUIRE(str0 == "foo"); // dummy check to ensure s0 available
-    REQUIRE(str1 == "hello"); // dummy check to ensure s0 available
+    REQUIRE(str1 == "hello"); // dummy check to ensure s1 available
 }
 
 static column_t make_int_column() {
