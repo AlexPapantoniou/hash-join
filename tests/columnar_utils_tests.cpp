@@ -129,7 +129,6 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[columnar_u
     // we'll store "foo" (3 bytes) and "hello" (5 bytes) concatenated
     const char* s1 = "foo";
     const char* s2 = "hello";
-    size_t dpos = 4;
     uint16_t off1 = static_cast<uint16_t>(strlen(s1));       // 3
     uint16_t off2 = static_cast<uint16_t>(strlen(s1) + strlen(s2)); // 8
 
