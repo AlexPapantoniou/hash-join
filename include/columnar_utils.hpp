@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 
 #include "plan.h"
 #include "table.h"
