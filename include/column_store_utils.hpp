@@ -220,9 +220,6 @@ namespace ColumnStoreUtils {
     }
 
     void unset_bitmap(std::vector<int8_t>& bitmap, uint16_t idx) {
-        while (bitmap.size() < idx / 8 + 1) {
-            bitmap.emplace_back(0);
-        }
         auto byte_idx = idx / 8;
         auto bit = idx % 8;
         bitmap[byte_idx] &= ~(1u << bit);
