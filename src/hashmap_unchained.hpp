@@ -29,6 +29,19 @@ public:
     };
 
 private:
+    struct FibHasher32 {
+        uint32_t shift;
+        static constexpr uint32_t FIB32 = 2654435769u;
+
+        explicit FibHasher32(uint32_t bucket_count)
+            : shift(32 - __builtin_ctz(bucket_count)) {
+        }
+
+        inline uint32_t operator()(uint32_t key) const noexcept {
+            return (key * FIB32) >> shift;
+        }
+    };
+
     // directory entry: upper 48 bits = start index (tuple index),
     // lower 16 bits = bloom/filter bits
     using directory_entry = uint64_t;
@@ -244,34 +257,38 @@ private:
 
     // Hash function: hardware CRC if available
     static uint64_t compute_hash(const Key& key) {
-        const uint8_t* data = (const uint8_t*)&key;
-        uint64_t hash;
+        // const uint8_t* data = (const uint8_t*)&key;
+        // uint64_t hash;
 
-#ifdef __SSE4_2__
-        if constexpr (sizeof(Key) == 8) {
-            uint64_t value;
-            memcpy(&value, data, 8);
-            hash = _mm_crc32_u64(0, value);
-        }
-        else {
-            uint32_t c = 0;
-            for (size_t i = 0; i < sizeof(Key); i++) {
-                c = _mm_crc32_u8(c, data[i]);
-            }
-            hash = ((uint64_t)c << 32) | c;
-        }
-#else
-        uint32_t c = 0xFFFFFFFFu;
-        for (size_t i = 0; i < sizeof(Key); i++) {
-            c ^= data[i];
-            for (int k = 0; k < 8; k++) {
-                c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
-            }
-        }
-        c ^= 0xFFFFFFFFu;
-        hash = ((uint64_t)c << 32) | c;
-#endif
-        return hash * 0x2545F4914F6CDD1DULL;
+// #ifdef __SSE4_2__
+        //         if constexpr (sizeof(Key) == 8) {
+        //             uint64_t value;
+        //             memcpy(&value, data, 8);
+        //             hash = _mm_crc32_u64(0, value);
+        //         }
+        //         else {
+        //             uint32_t c = 0;
+        //             for (size_t i = 0; i < sizeof(Key); i++) {
+        //                 c = _mm_crc32_u8(c, data[i]);
+        //             }
+        //             hash = ((uint64_t)c << 32) | c;
+        //         }
+        // #else
+        //         uint32_t c = 0xFFFFFFFFu;
+        //         for (size_t i = 0; i < sizeof(Key); i++) {
+        //             c ^= data[i];
+        //             for (int k = 0; k < 8; k++) {
+        //                 c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
+        //             }
+        //         }
+        //         c ^= 0xFFFFFFFFu;
+        //         hash = ((uint64_t)c << 32) | c;
+        // #endif
+        //         return hash * 0x2545F4914F6CDD1DULL;
+        constexpr uint64_t FIB64 = 11400714819323198485ULL;
+        using U = std::make_unsigned_t<Key>;
+        uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
+        return k * FIB64;
     }
 
     void init_directory(size_t buckets) {

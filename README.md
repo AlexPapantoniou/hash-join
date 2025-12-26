@@ -127,4 +127,5 @@ cuckoo: 66000ms
 
 Χρόνος εκτέλεσης των queries:
 
-unchained: 56000ms
+crc32: 56000ms
+fibonacci: 60000ms

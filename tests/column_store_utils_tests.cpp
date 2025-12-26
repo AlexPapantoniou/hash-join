@@ -100,7 +100,7 @@ TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]")
     REQUIRE(value.as_i32() == 222);
 }
 
-TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_store_utils][my_copy][string]") {
+TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_store_utils][my_copy][short_string]") {
     Plan plan;
     ColumnarTable table;
     table.columns.emplace_back(DataType::VARCHAR);
@@ -168,6 +168,63 @@ TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_sto
 
     REQUIRE(str0 == "foo"); // dummy check to ensure s0 available
     REQUIRE(str1 == "hello"); // dummy check to ensure s1 available
+}
+
+TEST_CASE("my_copy + string_from_rep long VARCHAR page roundtrip", "[column_store_utils][my_copy][long_string]") {
+    Plan plan;
+    ColumnarTable table;
+    table.columns.emplace_back(DataType::VARCHAR);
+    Column& col = table.columns.back();
+
+    const size_t N = 10000;
+    std::string long_str(10000, 'a');
+
+    size_t remaining = N;
+    size_t offset = 0;
+    bool first = true;
+
+    while (remaining > 0) {
+        Page* p = col.new_page();
+        memset(p->data, 0, PAGE_SIZE);
+
+        uint16_t header = first ? 0xFFFF : 0xFFFE;
+        *reinterpret_cast<uint16_t*>(p->data) = header;
+
+        size_t cap = PAGE_SIZE - 4;
+        size_t chunk_size = std::min(cap, remaining);
+
+        *reinterpret_cast<uint16_t*>(p->data + 2) = static_cast<uint16_t>(chunk_size);
+
+        memcpy(p->data + 4, long_str.data() + offset, chunk_size);
+
+        remaining -= chunk_size;
+        offset += chunk_size;
+        first = false;
+    }
+
+    table.num_rows = 1;
+    plan.inputs.emplace_back(std::move(table)); // so string_from_rep can read pages
+
+    // prepare output attrs (single column)
+    std::vector<std::tuple<size_t, DataType>> output_attrs = { {0, DataType::VARCHAR} };
+
+    auto res = my_copy(plan.inputs[0], output_attrs, /*table_id=*/0);
+
+    REQUIRE(res.size() == 1);
+    REQUIRE(res[0].num_rows == 1);
+
+    const column_t& column = res[0];
+    const auto* page = column.pages[0];
+
+    ColumnarUtils::value_t value0 = page->data[0];
+    REQUIRE(value0.kind() == ColumnarUtils::KIND_STRING);
+
+    // reconstruct strings via string_from_rep and compare
+    ColumnarUtils::str_rep_t r0 = value0.as_str_rep();
+
+    std::string str0 = string_from_rep(plan, r0);
+
+    REQUIRE(str0 == long_str); // dummy check to ensure s0 available
 }
 
 static column_t make_int_column() {
