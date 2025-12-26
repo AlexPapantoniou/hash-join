@@ -317,9 +317,7 @@ namespace Contest {
         const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
         auto                           table_id = scan.base_table_id;
         auto& input = plan.inputs[table_id];
-        ExecuteResult temp = ColumnStoreUtils::my_copy(input, output_attrs, table_id);
-        return temp;
-        // return ColumnStoreUtils::my_copy(input, output_attrs, table_id);
+        return ColumnStoreUtils::my_copy(input, output_attrs, table_id);
     }
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
