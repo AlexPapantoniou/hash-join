@@ -51,7 +51,7 @@ jobs:
     
 
     - name: make hashmap_unchained_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unchained -Wno-dev && cmake --build build --target uchained_tests -j
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unchained -Wno-dev && cmake --build build --target unchained_tests -j
       continue-on-error: true
 
 
@@ -62,7 +62,7 @@ jobs:
       run: cmake --build build --target unit_tests -j 3 && ((./build/unit_tests) || true)
 
     - name: make columnar_utils_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target columnar_utils_tests
       continue-on-error: true
     
     - name: run columnar_utils_tests
@@ -70,7 +70,7 @@ jobs:
 
     
     - name: make column_store_utils_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target column_store_utils_tests
       continue-on-error: true
     
     - name: run column_store_utils_tests
