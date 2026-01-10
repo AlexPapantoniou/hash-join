@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <algorithm>
 
+#include <stdio.h>
+
 #ifdef __SSE4_2__
 #include <nmmintrin.h>
 #endif
@@ -26,6 +28,7 @@ public:
     struct Tuple {
         Key key;
         Value value;
+        uint64_t hash;
     };
 
 private:
@@ -51,33 +54,36 @@ private:
     std::vector<uint16_t> tags;     // Tags used to set bloom filters
 
     size_t tuple_count = 0;  // Total number of tuples in the hash map
-    int buckets_log2 = 0;    // Used to set shift (shift = 64 - buckets_log2)
     uint32_t shift = 0;      // Shift amount for directory (directory_index = hash >> shift)
+    size_t bucket_cnt = 0;   // Number of buckets in directory
 
 public:
     // Generates the tag table and sets the directory size
-    HashMapUnchained(size_t initial_buckets = 16) {
-        // Generates a table with tags that are 16-bit numbers with exactly 4 bits set to 1
-        generate_tag_table();
-        if (initial_buckets == 0) {
-            initial_buckets = 1;
+    HashMapUnchained(size_t buckets = 16) {
+        if (buckets == 0) {
+            buckets = 1;
         }
 
         // Find the next power of 2 to set the size of the directory
         size_t p = 1;
-        buckets_log2 = 0;
-        while (p < initial_buckets) {
+        while (p < buckets) {
             p <<= 1;
-            buckets_log2++;
         }
-        shift = 64 - buckets_log2;
+        bucket_cnt = p;
+        shift = 64 - __builtin_ctzll(bucket_cnt);
 
         init_directory(p);
+        // Generates a table with tags that are 16-bit numbers with exactly 4 bits set to 1
+        generate_tag_table();
     }
 
     // Reserve memory for n tuples
     void reserve(size_t n) {
-        tuples.reserve(n);
+        tuples.resize(n);
+    }
+
+    void set_tuple_count(size_t n) noexcept {
+        tuple_count = n;
     }
 
     // Check if there are no tuples in the map
@@ -95,57 +101,45 @@ public:
         return tuples.capacity();
     }
 
+    Tuple* data() noexcept {
+        return tuples.data();
+    }
+
+    void insert(const Tuple& tuple, size_t index) {
+        if (index >= tuples.size()) {
+            throw std::runtime_error("Out of bounds insert");
+        }
+        tuples[index] = tuple;
+    }
+
     // Just place the new tuple in the tuples vector. Process the directory later
     bool emplace(const Key& key, const Value& value) {
-        tuples.push_back(Tuple{ key, value });
+        tuples.push_back(Tuple{ key, value, compute_hash(key) });
         tuple_count++;
         return true;
     }
 
-    // Create the directory for the tuples already inserted
-    void create_directory() {
-        const size_t buckets = bucket_count();
-        if (buckets == 0) {
-            return;
+    void clear_directory() {
+        for (size_t i = 0; i < directory.size(); i++) {
+            directory[i] = pack_entry(0, 0);
         }
+    }
 
-        // Sort the tuples based on hash (not key)
-        std::sort(tuples.begin(), tuples.end(), [](const Tuple& t1, const Tuple& t2) { return compute_hash(t1.key) < compute_hash(t2.key); });
+    void count_and_tag(const Tuple& tuple) {
+        size_t slot = bucket_index_from_hash(tuple.hash);
 
-        // Step 1: compute hash for every tuple
-        std::vector<uint64_t> hashes(tuple_count);
-        for (size_t i = 0; i < tuple_count; i++) {
-            hashes[i] = compute_hash(tuples[i].key);
-        }
+        directory[slot] += (uint64_t(1) << 16);
+        directory[slot] |= tag_from_hash(tuple.hash);
+    }
 
-        // Step 2: count tuples per bucket
-        std::vector<size_t> count(buckets, 0);
-        for (size_t i = 0; i < tuple_count; i++) {
-            size_t bucket_idx = bucket_index_from_hash(hashes[i]);
-            count[bucket_idx]++;
-        }
+    size_t prefix_sum(size_t i, size_t prefix) {
+        size_t val = unpack_start(directory[i]);
+        directory[i] = pack_entry(prefix, unpack_filter(directory[i]));
+        return val;
+    }
 
-        // Step 3: prefix sum → start offsets
-        std::vector<size_t> start(buckets + 1, 0);
-        for (size_t i = 0; i < buckets; i++) {
-            start[i + 1] = start[i] + count[i];
-        }
-
-        // Step 4: Set filters
-        std::vector<uint16_t> filters(buckets, 0);
-        for (size_t i = 0; i < tuple_count; i++) {
-            size_t bucket_idx = bucket_index_from_hash(hashes[i]);
-            uint16_t slot = uint32_t(hashes[i]) >> (32 - 11);
-            uint16_t tag = tags[slot];
-            filters[bucket_idx] |= tag;
-        }
-
-        // Step 5: write directory
-        for (size_t bucket_idx = 0; bucket_idx < buckets; bucket_idx++) {
-            directory[bucket_idx] = pack_entry(start[bucket_idx], filters[bucket_idx]);
-        }
-
-        directory[buckets] = pack_entry(start[buckets], 0);
+    void finalize_directory() {
+        directory[bucket_cnt] = pack_entry(tuple_count, 0);
     }
 
     // Lookup range in which a key could be in
@@ -155,13 +149,14 @@ public:
         }
 
         uint64_t hash = compute_hash(key);
-        size_t bucket_idx = bucket_index_from_hash(hash);
+        size_t slot = bucket_index_from_hash(hash);
 
-        if (!could_contain((uint16_t)(directory[bucket_idx]), hash)) {
+        uint16_t filter = unpack_filter(directory[slot]);
+        if (!could_contain(filter, hash)) {
             return { 0, 0 };
         }
 
-        return bucket_range(bucket_idx);
+        return bucket_range(slot);
     }
 
     // Return the tuple in position 'idx'
@@ -183,9 +178,24 @@ public:
         return tuples[i];
     }
 
+    template<typename Index>
+    Tuple operator[](Index index) const {
+        size_t i = static_cast<size_t>(index);
+        if (i >= tuple_count) {
+            throw std::runtime_error("Out of bounds access");
+        }
+
+        return tuples[i];
+    }
+
     // Return the size of the directory
     size_t bucket_count() const {
         return directory.size() == 0 ? 0 : directory.size() - 1;
+    }
+
+    // Compute bucket index
+    inline size_t bucket_index_from_hash(uint64_t hash) const {
+        return (shift == 64) ? 0 : static_cast<size_t>(hash >> shift);
     }
 
 private:
@@ -210,20 +220,14 @@ private:
 
     //-------------------------
 
-    // Check if a key can be in the map based on the filter
-    bool could_contain(uint16_t entry, uint64_t hash) const {
-        uint16_t slot = ((uint32_t)hash) >> (32 - 11); // shr
-        uint16_t tag = tags[slot]; // mov
-        return !(tag & ~entry); // andn
+    uint16_t tag_from_hash(uint64_t hash) const {
+        return tags[(uint32_t(hash) >> (32 - 11))];
     }
 
-    // Compute bucket index
-    inline size_t bucket_index_from_hash(uint64_t hash) const {
-        if (buckets_log2 == 0) {
-            return 0;
-        }
-
-        return static_cast<size_t>(hash >> shift);
+    // Check if a key can be in the map based on the filter
+    bool could_contain(uint16_t filter, uint64_t hash) const {
+        uint16_t tag = tag_from_hash(hash); // mov
+        return !(tag & ~filter); // andn
     }
 
     // Directory range
@@ -240,7 +244,7 @@ private:
         // C(16,4) = 1820 tags
         for (int a = 0; a < 16; a++) {
             for (int b = a + 1; b < 16; b++) {
-                for (int c = b + 1; b < 16; b++) {
+                for (int c = b + 1; c < 16; c++) {
                     for (int d = c + 1; d < 16; d++) {
                         uint16_t mask = (1 << a) | (1 << b) | (1 << c) | (1 << d);
                         tags.push_back(mask);
@@ -257,38 +261,38 @@ private:
 
     // Hash function: hardware CRC if available
     static uint64_t compute_hash(const Key& key) {
-        // const uint8_t* data = (const uint8_t*)&key;
-        // uint64_t hash;
+        const uint8_t* data = (const uint8_t*)&key;
+        uint64_t hash;
 
-// #ifdef __SSE4_2__
-        //         if constexpr (sizeof(Key) == 8) {
-        //             uint64_t value;
-        //             memcpy(&value, data, 8);
-        //             hash = _mm_crc32_u64(0, value);
-        //         }
-        //         else {
-        //             uint32_t c = 0;
-        //             for (size_t i = 0; i < sizeof(Key); i++) {
-        //                 c = _mm_crc32_u8(c, data[i]);
-        //             }
-        //             hash = ((uint64_t)c << 32) | c;
-        //         }
-        // #else
-        //         uint32_t c = 0xFFFFFFFFu;
-        //         for (size_t i = 0; i < sizeof(Key); i++) {
-        //             c ^= data[i];
-        //             for (int k = 0; k < 8; k++) {
-        //                 c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
-        //             }
-        //         }
-        //         c ^= 0xFFFFFFFFu;
-        //         hash = ((uint64_t)c << 32) | c;
-        // #endif
-        //         return hash * 0x2545F4914F6CDD1DULL;
-        constexpr uint64_t FIB64 = 11400714819323198485ULL;
-        using U = std::make_unsigned_t<Key>;
-        uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
-        return k * FIB64;
+#ifdef __SSE4_2__
+        if constexpr (sizeof(Key) == 8) {
+            uint64_t value;
+            memcpy(&value, data, 8);
+            hash = _mm_crc32_u64(0, value);
+        }
+        else {
+            uint32_t c = 0;
+            for (size_t i = 0; i < sizeof(Key); i++) {
+                c = _mm_crc32_u8(c, data[i]);
+            }
+            hash = ((uint64_t)c << 32) | c;
+        }
+#else
+        uint32_t c = 0xFFFFFFFFu;
+        for (size_t i = 0; i < sizeof(Key); i++) {
+            c ^= data[i];
+            for (int k = 0; k < 8; k++) {
+                c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
+            }
+        }
+        c ^= 0xFFFFFFFFu;
+        hash = ((uint64_t)c << 32) | c;
+#endif
+        return hash * 0x2545F4914F6CDD1DULL;
+        // constexpr uint64_t FIB64 = 11400714819323198485ULL;
+        // using U = std::make_unsigned_t<Key>;
+        // uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
+        // return k * FIB64;
     }
 
     void init_directory(size_t buckets) {

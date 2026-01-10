@@ -9,11 +9,17 @@
 #include "../include/column_store_utils.hpp"
 #include "../include/slab_allocator.hpp"
 
+#include <stdio.h>
+#include <iostream>
+
 #include <thread>
 
 namespace Contest {
 
     using ExecuteResult = std::vector<ColumnStoreUtils::column_t>;
+    using Tuple = HashMapUnchained<int32_t, size_t>::Tuple;
+
+
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx, void* context);
 
@@ -32,18 +38,10 @@ namespace Contest {
             return column.pages[page_id]->data[offset];
         }
 
-        struct BuildArgs {
-            size_t num_rows;
-
-            BuildArgs(size_t num_rows)
-                : num_rows(num_rows) {
-            }
-        };
-
-        void build_phase(size_t num_rows, SlabAllocator::TupleCollector& collector, size_t thread_id) {
-            size_t amount = num_rows / NumPartitions;
+        void build_phase(size_t build_rows, SlabAllocator::TupleCollector& collector, size_t thread_id) {
+            size_t amount = build_rows / NUM_PARTITIONS;
             size_t start = amount * thread_id;
-            size_t end = (thread_id == NumPartitions - 1) ? num_rows : start + amount;
+            size_t end = (thread_id == NUM_PARTITIONS - 1) ? build_rows : start + amount;
 
             if (build_left) {
                 for (size_t row = start; row < end; row++) {
@@ -53,7 +51,7 @@ namespace Contest {
                     }
 
                     int32_t key = value.as_i32();
-                    collector.consume({ key, row });
+                    collector.consume({ key, row, SlabAllocator::compute_hash(key) });
                 }
             }
             else {
@@ -64,142 +62,214 @@ namespace Contest {
                     }
 
                     int32_t key = value.as_i32();
-                    collector.consume({ key, row });
+                    collector.consume({ key, row, SlabAllocator::compute_hash(key) });
+                }
+            }
+        }
+
+        void merge_phase(const SlabAllocator::Context* con, size_t p, HashMapUnchained<int32_t, size_t>& hash_map,
+            const size_t* prefix, std::vector<size_t>& write_cursor) {
+            for (size_t t = 0; t < NUM_PARTITIONS; t++) {
+                auto& level3 = con->collectors[t].level3[p];
+                if (level3.chunks.empty()) {
+                    continue;
+                }
+                for (const auto& chunk : level3.chunks) {
+                    uint8_t* ptr = chunk.start;
+                    while (ptr < chunk.current) {
+                        Tuple t;
+                        memcpy(&t, ptr, sizeof(Tuple));
+                        hash_map.count_and_tag(t);
+                        ptr += sizeof(Tuple);
+                    }
+                }
+            }
+
+            size_t cur = prefix[p];
+            size_t k = __builtin_ctzll(hash_map.bucket_count());
+
+            size_t start = (p << k) / NUM_PARTITIONS;
+            size_t end = ((p + 1) << k) / NUM_PARTITIONS;
+
+            for (size_t i = start; i < end; i++) {
+                size_t bucket_size = hash_map.prefix_sum(i, cur);
+                write_cursor[i] = cur;
+                cur += bucket_size;
+            }
+
+            for (size_t t = 0; t < NUM_PARTITIONS; t++) {
+                auto& level3 = con->collectors[t].level3[p];
+                for (const auto& chunk : level3.chunks) {
+                    uint8_t* ptr = chunk.start;
+                    while (ptr < chunk.current) {
+                        Tuple t;
+                        memcpy(&t, ptr, sizeof(Tuple));
+                        size_t slot = hash_map.bucket_index_from_hash(t.hash);
+                        size_t pos = write_cursor[slot]++;
+                        hash_map.insert(t, pos);
+                        ptr += sizeof(Tuple);
+                    }
+                }
+            }
+        }
+
+        void probe_phase(size_t p, size_t start_row, size_t end_row, const ExecuteResult& probe, size_t probe_col,
+            const HashMapUnchained<int32_t, size_t>& hash_map, ExecuteResult& local_results) {
+            for (size_t row = start_row; row < end_row; row++) {
+                const auto& v = get_value(probe, probe_col, row);
+                if (v.is_null()) {
+                    continue;
+                }
+
+                int32_t key = v.as_i32();
+                auto pr = hash_map.lookup_range(key);
+                if (pr.first == pr.second) {
+                    // Empty
+                    continue;
+                }
+                for (size_t i = pr.first; i < pr.second; i++) {
+                    const auto& tuple = hash_map[i];
+                    if (tuple.key != key) {
+                        continue;
+                    }
+
+                    size_t left_row = build_left ? tuple.value : row;
+                    size_t right_row = build_left ? row : tuple.value;
+
+                    for (size_t c = 0; c < output_attrs.size(); c++) {
+                        size_t idx = std::get<0>(output_attrs[c]);
+                        auto val = (idx < left.size())
+                            ? get_value(left, idx, left_row)
+                            : get_value(right, idx - left.size(), right_row);
+                        local_results[c].insert(val);
+                    }
+                }
+            }
+        }
+
+        void merge_results(const std::vector<ExecuteResult>& local_results, ExecuteResult& results) {
+            if (local_results.empty()) {
+                return;
+            }
+
+            // Create output columns once
+            size_t num_cols = local_results[0].size();
+
+            // Append rows partition by partition
+            for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+                const auto& part = local_results[p];
+                if (part.empty()) continue;
+
+                size_t rows = part[0].num_rows;
+                for (size_t r = 0; r < rows; r++) {
+                    size_t p = r / ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                    size_t o = r % ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                    for (size_t c = 0; c < num_cols; c++) {
+                        results[c].insert(part[c].pages[p]->data[o]);
+                    }
                 }
             }
         }
 
         void run_unchained(void* context) {
-            size_t left_num_rows = left[left_col].num_rows;
-            size_t right_num_rows = right[right_col].num_rows;
+            const ExecuteResult& build = build_left ? left : right;
+            const ExecuteResult& probe = build_left ? right : left;
+
+            size_t build_col = build_left ? left_col : right_col;
+            size_t probe_col = build_left ? right_col : left_col;
+            size_t build_rows = build[build_col].num_rows;
+
             SlabAllocator::Context* con = static_cast<SlabAllocator::Context*>(context);
-            size_t num_rows = build_left ? left_num_rows : right_num_rows;
+            con->reset();
 
-            std::thread threads[NumPartitions];
+            std::thread threads[NUM_PARTITIONS];
 
-            for (size_t i = 0; i < NumPartitions; i++) {
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
                 threads[i] = std::thread([&, i]() {
-                    build_phase(num_rows, con->collectors[i], i);
+                    build_phase(build_rows, con->collectors[i], i);
                     });
             }
 
-            for (size_t i = 0; i < NumPartitions; i++) {
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
                 if (threads[i].joinable()) {
                     threads[i].join();
                 }
             }
 
-            size_t build_rows = build_left ? left_num_rows : right_num_rows;
-            size_t init_cap = static_cast<size_t>(std::max<size_t>(1, build_rows / LOAD_FACTOR));
-
-            HashMapUnchained<int32_t, size_t> hash_map(init_cap);
-            hash_map.reserve(build_rows);
-
-            //------------
-            // Build phase
-            //------------
-            if (build_left) {
-                for (size_t row = 0; row < left_num_rows; row++) {
-                    const auto& value = get_value(left, left_col, row);
-                    if (value.is_null()) {
-                        continue;
-                    }
-
-                    int32_t key = value.as_i32();
-                    hash_map.emplace(key, row);
-                }
-            }
-            else {
-                for (size_t row = 0; row < right_num_rows; row++) {
-                    const auto& value = get_value(right, right_col, row);
-                    if (value.is_null()) {
-                        continue;
-                    }
-
-                    int32_t key = value.as_i32();
-                    hash_map.emplace(key, row);
+            size_t counts[NUM_PARTITIONS] = { 0 };
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+                for (size_t j = 0; j < NUM_PARTITIONS; j++) {
+                    counts[i] += con->collectors[j].counts[i];
                 }
             }
 
-            hash_map.create_directory();
+            size_t prefix[NUM_PARTITIONS];
+            size_t total = 0;
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+                prefix[i] = total;
+                total += counts[i];
+            }
 
-            //------------
+            size_t buckets = 1;
+            while (buckets < size_t(double(total) / LOAD_FACTOR)) {
+                buckets <<= 1;
+            }
+
+            if (buckets < NUM_PARTITIONS) {
+                buckets = NUM_PARTITIONS;
+            }
+
+            HashMapUnchained<int32_t, size_t> hash_map(buckets);
+            hash_map.reserve(total);
+            hash_map.clear_directory();
+
+            std::vector<size_t> write_cursor(hash_map.bucket_count());
+
+            for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+                threads[p] = std::thread([&, p]() {
+                    merge_phase(con, p, hash_map, prefix, write_cursor);
+                    });
+            }
+
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+                if (threads[i].joinable()) {
+                    threads[i].join();
+                }
+            }
+
+            hash_map.set_tuple_count(total);
+            hash_map.finalize_directory();
+
+            // ------------
             // Probe phase
-            //------------
-            if (build_left) {
-                // Build from left, probe with right
-                for (size_t row = 0; row < right_num_rows; row++) {
-                    const auto& value = get_value(right, right_col, row);
-                    if (value.is_null()) {
-                        continue;
-                    }
+            // ------------
 
-                    int32_t key = value.as_i32();
-                    auto pr = hash_map.lookup_range(key);
-                    if (pr.first == pr.second) {
-                        // Empty
-                        continue;
-                    }
-
-                    for (size_t idx = pr.first; idx < pr.second; idx++) {
-                        const auto& tuple = hash_map[idx];
-                        if (tuple.key != key) {
-                            continue;
-                        }
-
-                        size_t left_row = tuple.value;
-                        for (size_t j = 0; j < output_attrs.size(); j++) {
-                            size_t col_idx = std::get<0>(output_attrs[j]);
-                            ColumnarUtils::value_t v;
-
-                            if (col_idx < left.size()) {
-                                v = get_value(left, col_idx, left_row);
-                            }
-                            else {
-                                v = get_value(right, col_idx - left.size(), row);
-                            }
-                            results[j].insert(v);
-                        }
-                    }
+            size_t total_rows = probe[probe_col].num_rows;
+            size_t start_row = 0;
+            size_t rows_per_thread = total_rows / NUM_PARTITIONS;
+            std::vector<ExecuteResult> local_results(NUM_PARTITIONS);
+            for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+                local_results[p].reserve(output_attrs.size());
+                for (auto&& [_, dt] : output_attrs) {
+                    local_results[p].emplace_back(dt);
                 }
             }
-            else {
-                // Build from right, probe with left
-                for (size_t row = 0; row < left_num_rows; row++) {
-                    const auto& value = get_value(left, left_col, row);
-                    if (value.is_null()) {
-                        continue;
-                    }
 
-                    int32_t key = value.as_i32();
-                    auto pr = hash_map.lookup_range(key);
-                    if (pr.first == pr.second) {
-                        // Empty
-                        continue;
-                    }
+            for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+                size_t end_row = (p == NUM_PARTITIONS - 1) ? total_rows : start_row + rows_per_thread;
+                threads[p] = std::thread([&, p, probe_col, start_row, end_row]() {
+                    probe_phase(p, start_row, end_row, probe, probe_col, hash_map, local_results[p]);
+                    });
+                start_row = end_row;
+            }
 
-                    for (size_t idx = pr.first; idx < pr.second; idx++) {
-                        const auto& tuple = hash_map[idx];
-                        if (tuple.key != key) {
-                            continue;
-                        }
-
-                        size_t right_row = tuple.value;
-                        for (size_t j = 0; j < output_attrs.size(); j++) {
-                            size_t col_idx = std::get<0>(output_attrs[j]);
-                            ColumnarUtils::value_t v;
-
-                            if (col_idx < left.size()) {
-                                v = get_value(left, col_idx, row);
-                            }
-                            else {
-                                v = get_value(right, col_idx - left.size(), right_row);
-                            }
-                            results[j].insert(v);
-                        }
-                    }
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+                if (threads[i].joinable()) {
+                    threads[i].join();
                 }
             }
+
+            merge_results(local_results, results);
         }
     };
 
@@ -274,6 +344,9 @@ namespace Contest {
         return new SlabAllocator::Context();
     }
 
-    void destroy_context([[maybe_unused]] void* context) {}
+    void destroy_context([[maybe_unused]] void* context) {
+        SlabAllocator::Context* con = static_cast<SlabAllocator::Context*>(context);
+        delete con;
+    }
 
 } // namespace Contest
