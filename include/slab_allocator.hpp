@@ -10,12 +10,14 @@
 
 #include "../src/hashmap_unchained.hpp"
 
-#define NumPartitions 16
+#define NUM_PARTITIONS 32
 
 namespace SlabAllocator {
+    static constexpr size_t SMALL_CHUNK_SIZE = 64 * 1024;  // 64 KB
+
 
     struct Level1Slab {
-        static constexpr size_t LARGE_CHUNK_SIZE = 4 * 1024 * 1024;  // 4 MB
+        static constexpr size_t LARGE_CHUNK_SIZE = std::max<size_t>(4 * 1024 * 1024, 2 * NUM_PARTITIONS * SMALL_CHUNK_SIZE);  // 4 MB
 
         struct LargeChunk {
             uint8_t* start = nullptr;
@@ -23,29 +25,37 @@ namespace SlabAllocator {
         };
 
         std::vector<LargeChunk> chunks;
+        size_t free_chunk_idx = 0;
 
         Level1Slab() = default;
-
-        LargeChunk allocate_large_chunk() {
-            LargeChunk large_chunk;
-            large_chunk.size = LARGE_CHUNK_SIZE;
-            large_chunk.start = static_cast<uint8_t*>(malloc(LARGE_CHUNK_SIZE));
-
-            chunks.push_back(large_chunk);
-            return large_chunk;
-        }
 
         ~Level1Slab() {
             for (auto& chunk : chunks) {
                 free(chunk.start);
-                // chunk.start = nullptr;
             }
+        }
+
+        LargeChunk allocate_large_chunk() {
+            LargeChunk large_chunk;
+            if (free_chunk_idx == chunks.size()) {
+                large_chunk.size = LARGE_CHUNK_SIZE;
+                large_chunk.start = static_cast<uint8_t*>(malloc(LARGE_CHUNK_SIZE));
+                chunks.push_back(large_chunk);
+            }
+            else {
+                large_chunk = chunks[free_chunk_idx];
+            }
+            free_chunk_idx++;
+
+            return large_chunk;
+        }
+
+        void reset() {
+            free_chunk_idx = 0;
         }
     };
 
     struct Level2Slab {
-        static constexpr size_t SMALL_CHUNK_SIZE = 128 * 1024;  // 128 KB
-
         struct SmallChunk {
             uint8_t* start = nullptr;
             size_t size = 0;
@@ -55,6 +65,8 @@ namespace SlabAllocator {
         size_t remaining = 0;
 
         Level2Slab() = default;
+
+        ~Level2Slab() = default;
 
         size_t free_space() const noexcept {
             return remaining;
@@ -76,12 +88,18 @@ namespace SlabAllocator {
 
             return small_chunk;
         }
+
+        void reset() {
+            current = nullptr;
+            remaining = 0;
+        }
     };
 
     struct Level3Slab {
         using Tuple = HashMapUnchained<int32_t, size_t>::Tuple;
 
         struct SmallChunk {
+            uint8_t* start = nullptr;
             uint8_t* current = nullptr;
             uint8_t* end = nullptr;
         };
@@ -89,6 +107,12 @@ namespace SlabAllocator {
         std::vector<SmallChunk> chunks;
 
         Level3Slab() = default;
+
+        ~Level3Slab() = default;
+
+        void reset() {
+            chunks.clear();
+        }
 
         size_t free_space() const {
             if (chunks.empty()) {
@@ -101,6 +125,7 @@ namespace SlabAllocator {
 
         void add_space(const Level2Slab::SmallChunk& small_chunk) {
             SmallChunk new_chunk;
+            new_chunk.start = small_chunk.start;
             new_chunk.current = small_chunk.start;
             new_chunk.end = small_chunk.start + small_chunk.size;
             chunks.push_back(new_chunk);
@@ -116,7 +141,7 @@ namespace SlabAllocator {
     uint64_t log2_num_partitions() noexcept {
         size_t p = 1;
         uint64_t log2 = 0;
-        while (p < NumPartitions) {
+        while (p < NUM_PARTITIONS) {
             p <<= 1;
             log2++;
         }
@@ -127,38 +152,38 @@ namespace SlabAllocator {
     // Hash function: hardware CRC if available
     template <typename Key>
     static uint64_t compute_hash(const Key& key) {
-        // const uint8_t* data = (const uint8_t*)&key;
-        // uint64_t hash;
+        const uint8_t* data = (const uint8_t*)&key;
+        uint64_t hash;
 
-// #ifdef __SSE4_2__
-        //         if constexpr (sizeof(Key) == 8) {
-        //             uint64_t value;
-        //             memcpy(&value, data, 8);
-        //             hash = _mm_crc32_u64(0, value);
-        //         }
-        //         else {
-        //             uint32_t c = 0;
-        //             for (size_t i = 0; i < sizeof(Key); i++) {
-        //                 c = _mm_crc32_u8(c, data[i]);
-        //             }
-        //             hash = ((uint64_t)c << 32) | c;
-        //         }
-        // #else
-        //         uint32_t c = 0xFFFFFFFFu;
-        //         for (size_t i = 0; i < sizeof(Key); i++) {
-        //             c ^= data[i];
-        //             for (int k = 0; k < 8; k++) {
-        //                 c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
-        //             }
-        //         }
-        //         c ^= 0xFFFFFFFFu;
-        //         hash = ((uint64_t)c << 32) | c;
-        // #endif
-        //         return hash * 0x2545F4914F6CDD1DULL;
-        constexpr uint64_t FIB64 = 11400714819323198485ULL;
-        using U = std::make_unsigned_t<Key>;
-        uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
-        return k * FIB64;
+#ifdef __SSE4_2__
+        if constexpr (sizeof(Key) == 8) {
+            uint64_t value;
+            memcpy(&value, data, 8);
+            hash = _mm_crc32_u64(0, value);
+        }
+        else {
+            uint32_t c = 0;
+            for (size_t i = 0; i < sizeof(Key); i++) {
+                c = _mm_crc32_u8(c, data[i]);
+            }
+            hash = ((uint64_t)c << 32) | c;
+        }
+#else
+        uint32_t c = 0xFFFFFFFFu;
+        for (size_t i = 0; i < sizeof(Key); i++) {
+            c ^= data[i];
+            for (int k = 0; k < 8; k++) {
+                c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
+            }
+        }
+        c ^= 0xFFFFFFFFu;
+        hash = ((uint64_t)c << 32) | c;
+#endif
+        return hash * 0x2545F4914F6CDD1DULL;
+        // constexpr uint64_t FIB64 = 11400714819323198485ULL;
+        // using U = std::make_unsigned_t<Key>;
+        // uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
+        // return k * FIB64;
     }
 
     struct TupleCollector {
@@ -166,12 +191,23 @@ namespace SlabAllocator {
 
         Level1Slab level1;
         Level2Slab level2;
-        Level3Slab level3[NumPartitions];
-        size_t counts[NumPartitions];
+        Level3Slab level3[NUM_PARTITIONS];
+        size_t counts[NUM_PARTITIONS] = { 0 };
 
         TupleCollector() = default;
 
         uint64_t shift = 64 - log2_num_partitions();
+
+        void reset() {
+            std::memset(counts, 0, sizeof(counts));
+
+            for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+                level3[p].reset();
+            }
+
+            level1.reset();
+            level2.reset();
+        }
 
         void consume(const Tuple& tuple) {
             uint64_t part = compute_hash<int32_t>(tuple.key) >> shift;
@@ -181,13 +217,21 @@ namespace SlabAllocator {
             }
 
             *level3[part].allocate_tuple() = tuple;
-            counts[part] += 1;
+            counts[part]++;
         }
     };
 
     struct Context {
-        TupleCollector collectors[NumPartitions];
+        TupleCollector collectors[NUM_PARTITIONS];
 
         Context() = default;
+
+        ~Context() = default;
+
+        void reset() {
+            for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+                collectors[i].reset();
+            }
+        }
     };
 }
