@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cassert>
+#include <thread>
 
 #include "plan.h"
 #include "table.h"
@@ -42,8 +43,11 @@ namespace ColumnStoreUtils {
             }
         };
 
-        std::vector<page_t*> pages;
         size_t num_rows{ 0 };
+        bool has_nulls = true;
+
+        std::vector<page_t*> pages;
+        const Column* orig_col = nullptr;
 
         page_t* new_page() {
             page_t* p = new page_t();
@@ -56,8 +60,35 @@ namespace ColumnStoreUtils {
         column_t(const column_t&) = delete;
         column_t& operator=(const column_t&) = delete;
 
-        column_t(column_t&&) = default;
-        column_t& operator=(column_t&&) = default;
+        column_t(column_t&& other) noexcept
+            : num_rows(other.num_rows)
+            , has_nulls(other.has_nulls)
+            , pages(std::move(other.pages))
+            , orig_col(other.orig_col) {
+
+            other.pages.clear();
+            other.orig_col = nullptr;
+            other.num_rows = 0;
+        }
+
+        column_t& operator=(column_t&& other) noexcept {
+            if (this != &other) {
+                for (auto* p : pages) {
+                    delete p;
+                }
+
+                num_rows = other.num_rows;
+                has_nulls = other.has_nulls;
+                pages = std::move(other.pages);
+                orig_col = other.orig_col;
+
+                other.pages.clear();
+                other.orig_col = nullptr;
+                other.num_rows = 0;
+            }
+
+            return *this;
+        }
 
         column_t(DataType data_type)
             : pages()
@@ -106,36 +137,65 @@ namespace ColumnStoreUtils {
             if (col_idx >= table.columns.size()) {
                 continue;
             }
-            const Column& col = table.columns[col_idx];
+            const Column* col = &table.columns[col_idx];
             size_t row_idx = 0;
             size_t page_id = 0;
 
-            for (Page* p : col.pages) {
-                if (!p) {
-                    page_id++;
-                    continue;
-                }
+            if (dt == DataType::INT32) {
+                bool has_nulls = false;
+                for (Page* p : col->pages) {
+                    if (!p) {
+                        continue;
+                    }
 
-                uint16_t header = *reinterpret_cast<uint16_t*>(p->data);
-
-                if (dt == DataType::INT32) {
-                    uint16_t rows_in_page = header;
-                    const uint32_t* data_begin = reinterpret_cast<const uint32_t*>(p->data + 4);
-                    const uint8_t* bitmap = reinterpret_cast<const uint8_t*>(p->data + PAGE_SIZE - ((rows_in_page + 7) / 8));
-                    uint16_t data_idx = 0;
-                    for (uint16_t i = 0; i < rows_in_page && row_idx < num_rows; i++) {
-                        if (get_bitmap(bitmap, i)) {
-                            uint32_t v = data_begin[data_idx++];
-                            results[out_col].insert(ColumnarUtils::value_t::make_int32(static_cast<int32_t>(v)));
-                        }
-                        else {
-                            results[out_col].insert(ColumnarUtils::value_t::make_null());
-                        }
-                        // else leave null
-                        row_idx++;
+                    const uint16_t rows_in_page = *reinterpret_cast<uint16_t*>(p->data);
+                    const uint16_t non_nulls = *reinterpret_cast<uint16_t*>(p->data + 2);
+                    if (non_nulls < rows_in_page) {
+                        has_nulls = true;
+                        break;
                     }
                 }
-                else if (dt == DataType::VARCHAR) {
+
+                if (!has_nulls) {
+                    results[out_col].num_rows = num_rows;
+                    results[out_col].has_nulls = false;
+                    results[out_col].orig_col = col;
+                    continue;
+                }
+                else {
+                    for (Page* p : col->pages) {
+                        if (!p) {
+                            page_id++;
+                            continue;
+                        }
+
+                        uint16_t rows_in_page = *reinterpret_cast<uint16_t*>(p->data);
+                        const uint32_t* data_begin = reinterpret_cast<const uint32_t*>(p->data + 4);
+                        const uint8_t* bitmap = reinterpret_cast<const uint8_t*>(p->data + PAGE_SIZE - ((rows_in_page + 7) / 8));
+                        uint16_t data_idx = 0;
+                        for (uint16_t i = 0; i < rows_in_page && row_idx < num_rows; i++) {
+                            if (get_bitmap(bitmap, i)) {
+                                uint32_t v = data_begin[data_idx++];
+                                results[out_col].insert(ColumnarUtils::value_t::make_int32(static_cast<int32_t>(v)));
+                            }
+                            else {
+                                results[out_col].insert(ColumnarUtils::value_t::make_null());
+                            }
+                            // else leave null
+                            row_idx++;
+                        }
+                        page_id++;
+                    }
+                }
+            }
+            else if (dt == DataType::VARCHAR) {
+                for (Page* p : col->pages) {
+                    if (!p) {
+                        page_id++;
+                        continue;
+                    }
+                    uint16_t header = *reinterpret_cast<uint16_t*>(p->data);
+
                     if (header == 0xFFFF) {
                         // long-string first page => one logical row
                         if (row_idx < num_rows) {
@@ -177,8 +237,17 @@ namespace ColumnStoreUtils {
                             row_idx++;
                         }
                     }
+                    page_id++;
                 }
-                else {
+            }
+            else {
+                for (Page* p : col->pages) {
+                    if (!p) {
+                        page_id++;
+                        continue;
+                    }
+                    uint16_t header = *reinterpret_cast<uint16_t*>(p->data);
+
                     // unsupported types: keep NULL
                     // we still must advance row_idx by number of logical rows on the page
                     if (header == 0xFFFF) {
@@ -196,10 +265,7 @@ namespace ColumnStoreUtils {
                         }
                     }
                 }
-
-                page_id++;
-            } // pages
-
+            }
             // if remaining logical rows with no pages: leave as null
             while (row_idx < num_rows) {
                 results[out_col].insert(ColumnarUtils::value_t::make_null());
@@ -230,135 +296,174 @@ namespace ColumnStoreUtils {
         const std::vector<column_t>& columns,
         const std::vector<DataType>& types) {
 
+        constexpr size_t NUM_THREADS = 32;
+
         ColumnarTable ret;
         ret.num_rows = columns.empty() ? 0 : columns[0].num_rows;
-
-        for (size_t c = 0; c < columns.size(); c++) {
-            const column_t& col = columns[c];
+        const size_t num_cols = columns.size();
+        const size_t cols_per_thread = num_cols / NUM_THREADS;
+        ret.columns.reserve(num_cols);
+        for (size_t c = 0; c < num_cols; c++) {
             ret.columns.emplace_back(types[c]);
-            Column& column = ret.columns.back();
-            switch (types[c]) {
-            case DataType::INT32: {
-                uint16_t num_rows = 0;
-                std::vector<int32_t> data;
-                std::vector<int8_t> bitmap;
-                data.reserve(2048);
-                bitmap.reserve(256);
-                auto save_page = [&column, &num_rows, &data, &bitmap]() {
-                    auto* page = column.new_page()->data;
-                    *reinterpret_cast<uint16_t*>(page) = num_rows;
-                    *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(data.size());
-                    memcpy(page + 4, data.data(), data.size() * 4);
-                    memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
-                    num_rows = 0;
-                    data.clear();
-                    bitmap.clear();
-                    };
-                for (const auto* p : col.pages) {
-                    for (size_t element = 0; element < p->num_elements; element++) {
-                        const auto& value = p->data[element];
-                        if (value.is_null()) {
-                            if (4 + (data.size()) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
-                                save_page();
+        }
+
+        std::thread threads[NUM_THREADS];
+
+        for (size_t tid = 0; tid < NUM_THREADS; tid++) {
+            threads[tid] = std::thread([&, tid]() {
+                size_t start = tid * cols_per_thread;
+                size_t end = (tid == NUM_THREADS - 1) ? num_cols : start + cols_per_thread;
+
+                for (size_t c = start; c < end; c++) {
+                    const column_t& col = columns[c];
+                    // ret.columns.emplace_back(types[c]);
+                    Column& column = ret.columns[c];
+
+                    if (!col.has_nulls) {
+                        const Column& in = *col.orig_col;
+
+                        for (Page* p : in.pages) {
+                            if (!p) {
+                                continue;
                             }
-                            unset_bitmap(bitmap, num_rows);
-                            num_rows++;
+
+                            Page* new_page = column.new_page();
+                            memcpy(new_page->data, p->data, PAGE_SIZE);
                         }
-                        else if (value.kind() == ColumnarUtils::KIND_INT32) {
-                            int32_t int_value = value.as_i32();
-                            if (4 + (data.size() + 1) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
-                                save_page();
-                            }
-                            set_bitmap(bitmap, num_rows);
-                            data.emplace_back(int_value);
-                            num_rows++;
-                        }
-                        else {
-                            throw std::runtime_error("not int32 or null");
-                        }
+
+                        continue;
                     }
-                }
-                if (num_rows != 0) {
-                    save_page();
-                }
-                break;
-            }
-            case DataType::VARCHAR: {
-                uint16_t num_rows = 0;
-                std::vector<char>     data;
-                std::vector<uint16_t> offsets;
-                std::vector<int8_t>  bitmap;
-                data.reserve(8192);
-                offsets.reserve(4096);
-                bitmap.reserve(512);
-                auto save_long_string = [&column](std::string_view data) {
-                    size_t offset = 0;
-                    auto first_page = true;
-                    while (offset < data.size()) {
-                        auto* page = column.new_page()->data;
-                        if (first_page) {
-                            *reinterpret_cast<uint16_t*>(page) = 0xffff;
-                            first_page = false;
-                        }
-                        else {
-                            *reinterpret_cast<uint16_t*>(page) = 0xfffe;
-                        }
-                        auto page_data_len = std::min(data.size() - offset, PAGE_SIZE - 4);
-                        *reinterpret_cast<uint16_t*>(page + 2) = page_data_len;
-                        memcpy(page + 4, data.data() + offset, page_data_len);
-                        offset += page_data_len;
-                    }
-                    };
-                auto save_page = [&column, &num_rows, &data, &offsets, &bitmap]() {
-                    auto* page = column.new_page()->data;
-                    *reinterpret_cast<uint16_t*>(page) = num_rows;
-                    *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(offsets.size());
-                    memcpy(page + 4, offsets.data(), offsets.size() * 2);
-                    memcpy(page + 4 + offsets.size() * 2, data.data(), data.size());
-                    memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
-                    num_rows = 0;
-                    data.clear();
-                    offsets.clear();
-                    bitmap.clear();
-                    };
-                for (const auto* p : col.pages) {
-                    for (size_t element = 0; element < p->num_elements; element++) {
-                        const auto& value = p->data[element];
-                        if (value.is_null()) {
-                            if (4 + offsets.size() * 2 + data.size() + (num_rows / 8) + 1 > PAGE_SIZE) {
-                                save_page();
-                            }
-                            unset_bitmap(bitmap, num_rows);
-                            num_rows++;
-                        }
-                        else if (value.kind() == ColumnarUtils::KIND_STRING) {
-                            std::string s = ColumnarUtils::string_from_rep(plan, value.as_str_rep());
-                            if (s.size() > PAGE_SIZE - 7) {
-                                if (num_rows > 0) {
-                                    save_page();
+
+                    switch (types[c]) {
+                    case DataType::INT32: {
+                        uint16_t num_rows = 0;
+                        std::vector<int32_t> data;
+                        std::vector<int8_t> bitmap;
+                        data.reserve(2048);
+                        bitmap.reserve(256);
+                        auto save_page = [&column, &num_rows, &data, &bitmap]() {
+                            auto* page = column.new_page()->data;
+                            *reinterpret_cast<uint16_t*>(page) = num_rows;
+                            *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(data.size());
+                            memcpy(page + 4, data.data(), data.size() * 4);
+                            memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
+                            num_rows = 0;
+                            data.clear();
+                            bitmap.clear();
+                            };
+                        for (const auto* p : col.pages) {
+                            for (size_t element = 0; element < p->num_elements; element++) {
+                                const auto& value = p->data[element];
+                                if (value.is_null()) {
+                                    if (4 + (data.size()) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
+                                        save_page();
+                                    }
+                                    unset_bitmap(bitmap, num_rows);
+                                    num_rows++;
                                 }
-                                save_long_string(s);
-                            }
-                            else {
-                                if (4 + (offsets.size() + 1) * 2 + (data.size() + s.size()) + (num_rows / 8 + 1) > PAGE_SIZE) {
-                                    save_page();
+                                else if (value.kind() == ColumnarUtils::KIND_INT32) {
+                                    int32_t int_value = value.as_i32();
+                                    if (4 + (data.size() + 1) * 4 + (num_rows / 8 + 1) > PAGE_SIZE) {
+                                        save_page();
+                                    }
+                                    set_bitmap(bitmap, num_rows);
+                                    data.emplace_back(int_value);
+                                    num_rows++;
                                 }
-                                set_bitmap(bitmap, num_rows);
-                                data.insert(data.end(), s.begin(), s.end());
-                                offsets.emplace_back(data.size());
-                                num_rows++;
+                                else {
+                                    throw std::runtime_error("not int32 or null");
+                                }
                             }
                         }
-                        else {
-                            throw std::runtime_error("not string or null");
+                        if (num_rows != 0) {
+                            save_page();
                         }
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        uint16_t num_rows = 0;
+                        std::vector<char>     data;
+                        std::vector<uint16_t> offsets;
+                        std::vector<int8_t>  bitmap;
+                        data.reserve(8192);
+                        offsets.reserve(4096);
+                        bitmap.reserve(512);
+                        auto save_long_string = [&column](std::string_view data) {
+                            size_t offset = 0;
+                            auto first_page = true;
+                            while (offset < data.size()) {
+                                auto* page = column.new_page()->data;
+                                if (first_page) {
+                                    *reinterpret_cast<uint16_t*>(page) = 0xffff;
+                                    first_page = false;
+                                }
+                                else {
+                                    *reinterpret_cast<uint16_t*>(page) = 0xfffe;
+                                }
+                                auto page_data_len = std::min(data.size() - offset, PAGE_SIZE - 4);
+                                *reinterpret_cast<uint16_t*>(page + 2) = page_data_len;
+                                memcpy(page + 4, data.data() + offset, page_data_len);
+                                offset += page_data_len;
+                            }
+                            };
+                        auto save_page = [&column, &num_rows, &data, &offsets, &bitmap]() {
+                            auto* page = column.new_page()->data;
+                            *reinterpret_cast<uint16_t*>(page) = num_rows;
+                            *reinterpret_cast<uint16_t*>(page + 2) = static_cast<uint16_t>(offsets.size());
+                            memcpy(page + 4, offsets.data(), offsets.size() * 2);
+                            memcpy(page + 4 + offsets.size() * 2, data.data(), data.size());
+                            memcpy(page + PAGE_SIZE - bitmap.size(), bitmap.data(), bitmap.size());
+                            num_rows = 0;
+                            data.clear();
+                            offsets.clear();
+                            bitmap.clear();
+                            };
+                        for (const auto* p : col.pages) {
+                            for (size_t element = 0; element < p->num_elements; element++) {
+                                const auto& value = p->data[element];
+                                if (value.is_null()) {
+                                    if (4 + offsets.size() * 2 + data.size() + (num_rows / 8) + 1 > PAGE_SIZE) {
+                                        save_page();
+                                    }
+                                    unset_bitmap(bitmap, num_rows);
+                                    num_rows++;
+                                }
+                                else if (value.kind() == ColumnarUtils::KIND_STRING) {
+                                    std::string s = ColumnarUtils::string_from_rep(plan, value.as_str_rep());
+                                    if (s.size() > PAGE_SIZE - 7) {
+                                        if (num_rows > 0) {
+                                            save_page();
+                                        }
+                                        save_long_string(s);
+                                    }
+                                    else {
+                                        if (4 + (offsets.size() + 1) * 2 + (data.size() + s.size()) + (num_rows / 8 + 1) > PAGE_SIZE) {
+                                            save_page();
+                                        }
+                                        set_bitmap(bitmap, num_rows);
+                                        data.insert(data.end(), s.begin(), s.end());
+                                        offsets.emplace_back(data.size());
+                                        num_rows++;
+                                    }
+                                }
+                                else {
+                                    throw std::runtime_error("not string or null");
+                                }
+                            }
+                        }
+                        if (num_rows != 0) {
+                            save_page();
+                        }
+                        break;
+                    }
                     }
                 }
-                if (num_rows != 0) {
-                    save_page();
-                }
-                break;
-            }
+                });
+        }
+
+        for (size_t i = 0; i < NUM_THREADS; i++) {
+            if (threads[i].joinable()) {
+                threads[i].join();
             }
         }
 

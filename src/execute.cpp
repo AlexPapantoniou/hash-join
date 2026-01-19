@@ -9,17 +9,13 @@
 #include "../include/column_store_utils.hpp"
 #include "../include/slab_allocator.hpp"
 
-#include <stdio.h>
-#include <iostream>
-
 #include <thread>
+#include <atomic>
 
 namespace Contest {
 
     using ExecuteResult = std::vector<ColumnStoreUtils::column_t>;
     using Tuple = HashMapUnchained<int32_t, size_t>::Tuple;
-
-
 
     ExecuteResult execute_impl(const Plan& plan, size_t node_idx, void* context);
 
@@ -30,33 +26,53 @@ namespace Contest {
         ExecuteResult& results;
         size_t                                           left_col, right_col;
         const std::vector<std::tuple<size_t, DataType>>& output_attrs;
+        std::atomic<size_t> next_row;
 
+        // Function to get the value from a certain position in a column_t
         static inline ColumnarUtils::value_t get_value(const ExecuteResult& table, size_t col, size_t row) {
             const ColumnStoreUtils::column_t& column = table[col];
-            size_t page_id = row / ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
-            size_t offset = row % ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
-            return column.pages[page_id]->data[offset];
+            if (column.has_nulls) {
+                size_t page_id = row / ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                size_t offset = row % ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                return column.pages[page_id]->data[offset];
+            }
+
+            const Column* orig_col = column.orig_col;
+            const Page* first_page = orig_col->pages[0];
+            const uint16_t rows_in_page = *reinterpret_cast<const uint16_t*>(first_page->data);
+
+            size_t page_id = row / rows_in_page;
+            size_t offset = row % rows_in_page;
+
+            const Page* p = orig_col->pages[page_id];
+            const uint32_t* data_begin = reinterpret_cast<const uint32_t*>(p->data + 4);
+            return ColumnarUtils::value_t::make_int32(static_cast<int32_t>(data_begin[offset]));
         }
 
-        void build_phase(size_t build_rows, SlabAllocator::TupleCollector& collector, size_t thread_id) {
-            size_t amount = build_rows / NUM_PARTITIONS;
-            size_t start = amount * thread_id;
-            size_t end = (thread_id == NUM_PARTITIONS - 1) ? build_rows : start + amount;
+        // ----------------------------------------------
+        // Functions which the threads will execute
+        // ----------------------------------------------
 
-            if (build_left) {
-                for (size_t row = start; row < end; row++) {
-                    const auto& value = get_value(left, left_col, row);
-                    if (value.is_null()) {
-                        continue;
-                    }
+        void build_phase(size_t build_rows, SlabAllocator::TupleCollector& collector) {
+            const auto& build = build_left ? left : right;
+            const size_t build_col = build_left ? left_col : right_col;
+            const auto& col = build[build_col];
+            const size_t page_rows = ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
 
-                    int32_t key = value.as_i32();
-                    collector.consume({ key, row, SlabAllocator::compute_hash(key) });
+            // Each thread takes the first available rows (there are no 'owned' rows by any thread)
+            while (true) {
+                size_t start = next_row.fetch_add(page_rows, std::memory_order_relaxed);
+                if (start >= build_rows) {
+                    break;
                 }
-            }
-            else {
+
+                size_t end = start + page_rows;
+                if (end > build_rows) {
+                    end = build_rows;
+                }
+
                 for (size_t row = start; row < end; row++) {
-                    const auto& value = get_value(right, right_col, row);
+                    const auto& value = get_value(build, build_col, row);
                     if (value.is_null()) {
                         continue;
                     }
@@ -113,40 +129,58 @@ namespace Contest {
             }
         }
 
-        void probe_phase(size_t p, size_t start_row, size_t end_row, const ExecuteResult& probe, size_t probe_col,
-            const HashMapUnchained<int32_t, size_t>& hash_map, ExecuteResult& local_results) {
-            for (size_t row = start_row; row < end_row; row++) {
-                const auto& v = get_value(probe, probe_col, row);
-                if (v.is_null()) {
-                    continue;
+        void probe_phase(size_t probe_rows, const HashMapUnchained<int32_t, size_t>& hash_map, ExecuteResult& local_results) {
+            const auto& probe = build_left ? right : left;
+            const size_t probe_col = build_left ? right_col : left_col;
+            const size_t page_rows = ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+
+            while (true) {
+                size_t start = next_row.fetch_add(page_rows, std::memory_order_relaxed);
+                if (start >= probe_rows) {
+                    break;
                 }
 
-                int32_t key = v.as_i32();
-                auto pr = hash_map.lookup_range(key);
-                if (pr.first == pr.second) {
-                    // Empty
-                    continue;
+                size_t end = start + page_rows;
+                if (end > probe_rows) {
+                    end = probe_rows;
                 }
-                for (size_t i = pr.first; i < pr.second; i++) {
-                    const auto& tuple = hash_map[i];
-                    if (tuple.key != key) {
+
+                for (size_t row = start; row < end; row++) {
+                    const auto& v = get_value(probe, probe_col, row);
+                    if (v.is_null()) {
                         continue;
                     }
 
-                    size_t left_row = build_left ? tuple.value : row;
-                    size_t right_row = build_left ? row : tuple.value;
+                    int32_t key = v.as_i32();
+                    auto pr = hash_map.lookup_range(key);
+                    if (pr.first == pr.second) {
+                        // Empty
+                        continue;
+                    }
+                    for (size_t i = pr.first; i < pr.second; i++) {
+                        const auto& tuple = hash_map[i];
+                        if (tuple.key != key) {
+                            continue;
+                        }
 
-                    for (size_t c = 0; c < output_attrs.size(); c++) {
-                        size_t idx = std::get<0>(output_attrs[c]);
-                        auto val = (idx < left.size())
-                            ? get_value(left, idx, left_row)
-                            : get_value(right, idx - left.size(), right_row);
-                        local_results[c].insert(val);
+                        size_t left_row = build_left ? tuple.value : row;
+                        size_t right_row = build_left ? row : tuple.value;
+
+                        for (size_t c = 0; c < output_attrs.size(); c++) {
+                            size_t idx = std::get<0>(output_attrs[c]);
+                            auto val = (idx < left.size())
+                                ? get_value(left, idx, left_row)
+                                : get_value(right, idx - left.size(), right_row);
+                            local_results[c].insert(val);
+                        }
                     }
                 }
             }
         }
 
+        // ----------------------------------------------
+
+        // Function to merge all the local results from each thread into the final result table
         void merge_results(const std::vector<ExecuteResult>& local_results, ExecuteResult& results) {
             if (local_results.empty()) {
                 return;
@@ -158,14 +192,16 @@ namespace Contest {
             // Append rows partition by partition
             for (size_t p = 0; p < NUM_PARTITIONS; p++) {
                 const auto& part = local_results[p];
-                if (part.empty()) continue;
+                if (part.empty()) {
+                    continue;
+                }
 
                 size_t rows = part[0].num_rows;
-                for (size_t r = 0; r < rows; r++) {
-                    size_t p = r / ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
-                    size_t o = r % ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
-                    for (size_t c = 0; c < num_cols; c++) {
-                        results[c].insert(part[c].pages[p]->data[o]);
+                for (size_t row = 0; row < rows; row++) {
+                    size_t page_id = row / ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                    size_t offset = row % ColumnStoreUtils::column_t::ELEMENTS_PER_PAGE;
+                    for (size_t col = 0; col < num_cols; col++) {
+                        results[col].insert(part[col].pages[page_id]->data[offset]);
                     }
                 }
             }
@@ -178,15 +214,18 @@ namespace Contest {
             size_t build_col = build_left ? left_col : right_col;
             size_t probe_col = build_left ? right_col : left_col;
             size_t build_rows = build[build_col].num_rows;
+            size_t probe_rows = probe[probe_col].num_rows;
 
             SlabAllocator::Context* con = static_cast<SlabAllocator::Context*>(context);
             con->reset();
 
             std::thread threads[NUM_PARTITIONS];
 
+            next_row.store(0, std::memory_order_relaxed);
+
             for (size_t i = 0; i < NUM_PARTITIONS; i++) {
                 threads[i] = std::thread([&, i]() {
-                    build_phase(build_rows, con->collectors[i], i);
+                    build_phase(build_rows, con->collectors[i]);
                     });
             }
 
@@ -196,6 +235,7 @@ namespace Contest {
                 }
             }
 
+            // Count how many tuples belong to each partition
             size_t counts[NUM_PARTITIONS] = { 0 };
             for (size_t i = 0; i < NUM_PARTITIONS; i++) {
                 for (size_t j = 0; j < NUM_PARTITIONS; j++) {
@@ -203,6 +243,7 @@ namespace Contest {
                 }
             }
 
+            // Compute prefix sums
             size_t prefix[NUM_PARTITIONS];
             size_t total = 0;
             for (size_t i = 0; i < NUM_PARTITIONS; i++) {
@@ -223,6 +264,7 @@ namespace Contest {
             hash_map.reserve(total);
             hash_map.clear_directory();
 
+            // temporary vector to store the index of the next free bucket for each partition
             std::vector<size_t> write_cursor(hash_map.bucket_count());
 
             for (size_t p = 0; p < NUM_PARTITIONS; p++) {
@@ -244,9 +286,6 @@ namespace Contest {
             // Probe phase
             // ------------
 
-            size_t total_rows = probe[probe_col].num_rows;
-            size_t start_row = 0;
-            size_t rows_per_thread = total_rows / NUM_PARTITIONS;
             std::vector<ExecuteResult> local_results(NUM_PARTITIONS);
             for (size_t p = 0; p < NUM_PARTITIONS; p++) {
                 local_results[p].reserve(output_attrs.size());
@@ -255,12 +294,13 @@ namespace Contest {
                 }
             }
 
+            next_row.store(0, std::memory_order_relaxed);
+
+            // Each thread produces a local_results table of results
             for (size_t p = 0; p < NUM_PARTITIONS; p++) {
-                size_t end_row = (p == NUM_PARTITIONS - 1) ? total_rows : start_row + rows_per_thread;
-                threads[p] = std::thread([&, p, probe_col, start_row, end_row]() {
-                    probe_phase(p, start_row, end_row, probe, probe_col, hash_map, local_results[p]);
+                threads[p] = std::thread([&, p, probe_rows]() {
+                    probe_phase(probe_rows, hash_map, local_results[p]);
                     });
-                start_row = end_row;
             }
 
             for (size_t i = 0; i < NUM_PARTITIONS; i++) {
@@ -269,6 +309,7 @@ namespace Contest {
                 }
             }
 
+            // The main thread merges the local results
             merge_results(local_results, results);
         }
     };
