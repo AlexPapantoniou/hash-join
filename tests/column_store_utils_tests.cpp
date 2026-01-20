@@ -40,16 +40,9 @@ TEST_CASE("column_t basic testing", "[column_store_utils][column_t]") {
     REQUIRE(col.pages.size() == 2);
 }
 
-TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]") {
-    // Build a ColumnarTable with one INT32 column and a single page:
-    // header: rows_in_page = 4, non_null_count = 2
-    // data block: two uint32 values (for non-null)
-    // bitmap at page end: indicates which rows are non-null
-    Plan plan;
-    ColumnarTable table;
+static void create_null_column(ColumnarTable& table) {
     table.columns.emplace_back(DataType::INT32);
     Column& col = table.columns.back();
-
     // allocate one page
     Page* p = col.new_page();
     // clear page
@@ -74,30 +67,80 @@ TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]")
     bitmap_byte |= (1u << 2); // row2 non-null
     // write bitmap
     memcpy(p->data + PAGE_SIZE - 1, &bitmap_byte, 1);
+}
 
-    table.num_rows = rows_in_page;
+static void create_non_null_column(ColumnarTable& table) {
+    table.columns.emplace_back(DataType::INT32);
+    Column& col = table.columns.back();
+    // allocate one page
+    Page* p = col.new_page();
+    // clear page
+    memset(p->data, 0, PAGE_SIZE);
 
-    // Prepare output attrs: single column 0, DataType::INT32
-    std::vector<std::tuple<size_t, DataType>> output_attrs = { {0, DataType::INT32} };
+    // header
+    uint16_t rows_in_page = 4;
+    uint16_t non_null = 4;
+    *reinterpret_cast<uint16_t*>(p->data) = rows_in_page;
+    *reinterpret_cast<uint16_t*>(p->data + 2) = non_null;
+
+    // write two uint32 values starting at p->data + 4
+    uint32_t* data_begin = reinterpret_cast<uint32_t*>(p->data + 4);
+    data_begin[0] = 111;
+    data_begin[1] = 222;
+    data_begin[2] = 333;
+    data_begin[3] = 444;
+
+    // build bitmap at page end: bitmap size = ceil(rows_in_page/8) = 1 byte
+    uint8_t bitmap_byte = 0;
+    // set non-null for all rows
+    bitmap_byte |= (1u << 0); // row0 non-null
+    bitmap_byte |= (1u << 1); // row1 non-null
+    bitmap_byte |= (1u << 2); // row2 non-null
+    bitmap_byte |= (1u << 3); // row3 non-null
+    // write bitmap
+    memcpy(p->data + PAGE_SIZE - 1, &bitmap_byte, 1);
+}
+
+TEST_CASE("my_copy reads INT32 correctly", "[column_store_utils][my_copy][int]") {
+    // Build a ColumnarTable with one INT32 column and a single page:
+    // header: rows_in_page = 4, non_null_count = 2
+    // data block: two uint32 values (for non-null)
+    // bitmap at page end: indicates which rows are non-null
+    Plan plan;
+    ColumnarTable table;
+    table.num_rows = 4;
+    create_null_column(table);
+    create_non_null_column(table);
+
+    // Prepare output attrs: 2 columns, DataType::INT32
+    std::vector<std::tuple<size_t, DataType>> output_attrs = { {0, DataType::INT32}, {1, DataType::INT32} };
 
     auto res = my_copy(table, output_attrs, 0);
 
-    REQUIRE(res.size() == 1);
-    REQUIRE(res[0].num_rows == rows_in_page);
+    REQUIRE(res.size() == 2);
+    REQUIRE(res[0].num_rows == 4);
 
-    const column_t& column = res[0];
-    const auto* page = column.pages[0];
+    const column_t& column0 = res[0];
+    REQUIRE(column0.has_nulls);
+    REQUIRE_FALSE(column0.pages.empty());
+    REQUIRE(column0.orig_col == nullptr);
+    const auto* page0 = column0.pages[0];
 
-    ColumnarUtils::value_t value = page->data[0];
+    ColumnarUtils::value_t value = page0->data[0];
     REQUIRE_FALSE(value.is_null());
     REQUIRE(value.as_i32() == 111);
 
-    value = page->data[1];
+    value = page0->data[1];
     REQUIRE(value.is_null());
 
-    value = page->data[2];
+    value = page0->data[2];
     REQUIRE_FALSE(value.is_null());
     REQUIRE(value.as_i32() == 222);
+
+    const column_t& column1 = res[1];
+    REQUIRE_FALSE(column1.has_nulls);
+    REQUIRE(column1.pages.empty());
+    REQUIRE_FALSE(column1.orig_col == nullptr);
 }
 
 TEST_CASE("my_copy + string_from_rep short VARCHAR page roundtrip", "[column_store_utils][my_copy][short_string]") {
@@ -234,6 +277,41 @@ static column_t make_int_column() {
     return col;
 }
 
+static column_t make_non_null_int_column(Column& col) {
+    // allocate one page
+    Page* p = col.new_page();
+    // clear page
+    memset(p->data, 0, PAGE_SIZE);
+
+    // header
+    uint16_t rows_in_page = 4;
+    uint16_t non_null = 4;
+    *reinterpret_cast<uint16_t*>(p->data) = rows_in_page;
+    *reinterpret_cast<uint16_t*>(p->data + 2) = non_null;
+
+    // write two uint32 values starting at p->data + 4
+    uint32_t* data_begin = reinterpret_cast<uint32_t*>(p->data + 4);
+    data_begin[0] = 111;
+    data_begin[1] = 222;
+    data_begin[2] = 333;
+    data_begin[3] = 444;
+
+    // build bitmap at page end: bitmap size = ceil(rows_in_page/8) = 1 byte
+    uint8_t bitmap_byte = 0;
+    // set non-null for all rows
+    bitmap_byte |= (1u << 0); // row0 non-null
+    bitmap_byte |= (1u << 1); // row1 non-null
+    bitmap_byte |= (1u << 2); // row2 non-null
+    bitmap_byte |= (1u << 3); // row3 non-null
+    // write bitmap
+    memcpy(p->data + PAGE_SIZE - 1, &bitmap_byte, 1);
+
+    column_t colt;
+    colt.has_nulls = false;
+    colt.orig_col = &col;
+    return colt;
+}
+
 static column_t make_varchar_column(const Plan& plan) {
     // We must reference real string storage in plan.inputs
     ColumnarTable table;
@@ -274,14 +352,18 @@ TEST_CASE("materialize(INT32, VARCHAR) produces correct ColumnarTable", "[column
     Plan plan;
 
     column_t int_col = make_int_column();
+    Column col(DataType::INT32);
+    column_t non_null_int_col = make_non_null_int_column(col);
     column_t str_col = make_varchar_column(plan);
 
     std::vector<column_t> columns;
-    columns.reserve(2);
+    columns.reserve(3);
     columns.push_back(std::move(int_col));
+    columns.push_back(std::move(non_null_int_col));
     columns.push_back(std::move(str_col));
 
     std::vector<DataType> types = {
+        DataType::INT32,
         DataType::INT32,
         DataType::VARCHAR
     };
@@ -310,9 +392,35 @@ TEST_CASE("materialize(INT32, VARCHAR) produces correct ColumnarTable", "[column
         REQUIRE((*bitmap & 0x2) != 0);
     }
 
-    // ----- VARCHAR checks -----
+    // ----- INT32 non null checks -----
     {
         const Column& col = result.columns[1];
+        REQUIRE(col.pages.size() == 1);
+
+        Page* p = col.pages[0];
+        uint16_t rows = *reinterpret_cast<uint16_t*>(p->data);
+        REQUIRE(rows == 4);
+
+        const uint32_t* values =
+            reinterpret_cast<const uint32_t*>(p->data + 4);
+
+        REQUIRE(values[0] == 111);
+        REQUIRE(values[1] == 222);
+        REQUIRE(values[2] == 333);
+        REQUIRE(values[3] == 444);
+
+        const uint8_t* bitmap =
+            reinterpret_cast<const uint8_t*>(p->data + PAGE_SIZE - 1);
+
+        REQUIRE((*bitmap & 0x1) != 0);
+        REQUIRE((*bitmap & 0x2) != 0);
+        REQUIRE((*bitmap & 0x4) != 0);
+        REQUIRE((*bitmap & 0x8) != 0);
+    }
+
+    // ----- VARCHAR checks -----
+    {
+        const Column& col = result.columns[2];
         REQUIRE(col.pages.size() == 1);
 
         Page* p = col.pages[0];
