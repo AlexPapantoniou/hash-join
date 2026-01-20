@@ -13,11 +13,10 @@
 #define NUM_PARTITIONS 32
 
 namespace SlabAllocator {
-    static constexpr size_t SMALL_CHUNK_SIZE = 64 * 1024;  // 64 KB
-
+    static constexpr size_t SMALL_CHUNK_SIZE = 128 * 1024;  // 128 KB
 
     struct Level1Slab {
-        static constexpr size_t LARGE_CHUNK_SIZE = std::max<size_t>(4 * 1024 * 1024, 2 * NUM_PARTITIONS * SMALL_CHUNK_SIZE);  // 4 MB
+        static constexpr size_t LARGE_CHUNK_SIZE = std::max<size_t>(4 * 1024 * 1024, 32 * NUM_PARTITIONS * SMALL_CHUNK_SIZE);  // 32 small chunks per thread, min 4 MB
 
         struct LargeChunk {
             uint8_t* start = nullptr;
@@ -25,7 +24,7 @@ namespace SlabAllocator {
         };
 
         std::vector<LargeChunk> chunks;
-        size_t free_chunk_idx = 0;
+        size_t free_chunk_idx = 0;  // index of the next free chunk
 
         Level1Slab() = default;
 
@@ -37,6 +36,7 @@ namespace SlabAllocator {
 
         LargeChunk allocate_large_chunk() {
             LargeChunk large_chunk;
+            // Only allocate a new large chunk if there is no free chunk available, else reuse existing one
             if (free_chunk_idx == chunks.size()) {
                 large_chunk.size = LARGE_CHUNK_SIZE;
                 large_chunk.start = static_cast<uint8_t*>(malloc(LARGE_CHUNK_SIZE));
@@ -51,6 +51,7 @@ namespace SlabAllocator {
         }
 
         void reset() {
+            // Do not free the chunks just set all as available
             free_chunk_idx = 0;
         }
     };
