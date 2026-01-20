@@ -109,6 +109,43 @@ TEST_CASE("HashMapUnchained Bloom filter behavior", "[hashmap][bloom]") {
     }
 }
 
+// Hash function: hardware CRC if available
+template<typename Key>
+static uint64_t compute_hash(const Key& key) {
+    const uint8_t* data = (const uint8_t*)&key;
+    uint64_t hash;
+
+#ifdef __SSE4_2__
+    if constexpr (sizeof(Key) == 8) {
+        uint64_t value;
+        memcpy(&value, data, 8);
+        hash = _mm_crc32_u64(0, value);
+    }
+    else {
+        uint32_t c = 0;
+        for (size_t i = 0; i < sizeof(Key); i++) {
+            c = _mm_crc32_u8(c, data[i]);
+        }
+        hash = ((uint64_t)c << 32) | c;
+    }
+#else
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < sizeof(Key); i++) {
+        c ^= data[i];
+        for (int k = 0; k < 8; k++) {
+            c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
+        }
+    }
+    c ^= 0xFFFFFFFFu;
+    hash = ((uint64_t)c << 32) | c;
+#endif
+    return hash * 0x2545F4914F6CDD1DULL;
+    // constexpr uint64_t FIB64 = 11400714819323198485ULL;
+    // using U = std::make_unsigned_t<Key>;
+    // uint64_t k = static_cast<uint64_t>(static_cast<U>(key));
+    // return k * FIB64;
+}
+
 TEST_CASE("HashMapUnchained random stress test", "[hashmap][stress]") {
     HashMapUnchained<int32_t, size_t> map(64);
 
@@ -142,5 +179,77 @@ TEST_CASE("HashMapUnchained random stress test", "[hashmap][stress]") {
         std::sort(expected.begin(), expected.end());
         std::sort(found.begin(), found.end());
         REQUIRE(found == expected);
+    }
+}
+
+TEST_CASE("Parallel hashmap functions test", "[hashmap][new_functions]") {
+    HashMapUnchained<int32_t, int32_t> map(32);
+    using Tuple = HashMapUnchained<int32_t, int32_t>::Tuple;
+
+    constexpr size_t NUM_TUPLES = 50;
+    constexpr size_t NUM_PARTITIONS = 32;
+
+    Tuple tuples[NUM_TUPLES];
+
+    // Count how many tuples belong to each partition
+    size_t counts[NUM_PARTITIONS] = { 0 };
+    for (size_t i = 0; i < NUM_TUPLES; i++) {
+        int32_t key = std::rand();
+        uint64_t hash = compute_hash(key);
+        size_t slot = map.bucket_index_from_hash(hash);
+        tuples[i] = { key, key, hash };
+        counts[slot]++;
+    }
+
+    // Compute prefix sums
+    size_t prefix[NUM_PARTITIONS];
+    size_t total = 0;
+    for (size_t i = 0; i < NUM_PARTITIONS; i++) {
+        prefix[i] = total;
+        total += counts[i];
+    }
+
+    map.resize(NUM_TUPLES);
+    std::vector<size_t> write_cursor(NUM_PARTITIONS);
+
+    for (int32_t i = 0; i < NUM_TUPLES; i++) {
+        map.count_and_tag(tuples[i]);
+    }
+
+    for (size_t p = 0; p < NUM_PARTITIONS; p++) {
+        size_t cur = prefix[p];
+        size_t k = __builtin_ctzll(map.bucket_count());
+
+        size_t start = (p << k) / NUM_PARTITIONS;
+        size_t end = ((p + 1) << k) / NUM_PARTITIONS;
+
+        for (size_t i = start; i < end; i++) {
+            size_t bucket_size = map.prefix_sum(i, cur);
+            write_cursor[i] = cur;
+            cur += bucket_size;
+        }
+    }
+
+    for (size_t i = 0; i < NUM_TUPLES; i++) {
+        size_t slot = map.bucket_index_from_hash(tuples[i].hash);
+        size_t pos = write_cursor[slot]++;
+        map.insert(tuples[i], pos);
+    }
+
+    map.set_tuple_count(NUM_TUPLES);
+    map.finalize_directory();
+
+    REQUIRE(map.size() == NUM_TUPLES);
+    for (int32_t i = 0; i < NUM_TUPLES; i++) {
+        auto r = map.lookup_range(tuples[i].key);
+        REQUIRE(r.second - r.first >= 1);
+        bool found = false;
+        for (size_t idx = r.first; idx < r.second; idx++) {
+            if (map[idx].key == tuples[i].key && map[idx].value == tuples[i].value) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found);
     }
 }

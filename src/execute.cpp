@@ -261,10 +261,9 @@ namespace Contest {
             }
 
             HashMapUnchained<int32_t, size_t> hash_map(buckets);
-            hash_map.reserve(total);
-            hash_map.clear_directory();
+            hash_map.resize(total);
 
-            // temporary vector to store the index of the next free bucket for each partition
+            // Temporary vector to store the index of the next free bucket for each partition
             std::vector<size_t> write_cursor(hash_map.bucket_count());
 
             for (size_t p = 0; p < NUM_PARTITIONS; p++) {

@@ -316,7 +316,6 @@ namespace ColumnStoreUtils {
 
                 for (size_t c = start; c < end; c++) {
                     const column_t& col = columns[c];
-                    // ret.columns.emplace_back(types[c]);
                     Column& column = ret.columns[c];
 
                     if (!col.has_nulls) {

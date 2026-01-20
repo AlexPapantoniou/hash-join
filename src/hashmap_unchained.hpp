@@ -70,7 +70,7 @@ public:
             p <<= 1;
         }
         bucket_cnt = p;
-        shift = 64 - __builtin_ctzll(bucket_cnt);
+        shift = 64 - __builtin_ctzl(p);
 
         init_directory(p);
         // Generates a table with tags that are 16-bit numbers with exactly 4 bits set to 1
@@ -78,8 +78,12 @@ public:
     }
 
     // Reserve memory for n tuples
-    void reserve(size_t n) {
+    void resize(size_t n) {
         tuples.resize(n);
+    }
+
+    void reserve(size_t n) {
+        tuples.reserve(n);
     }
 
     void set_tuple_count(size_t n) noexcept {
@@ -101,10 +105,6 @@ public:
         return tuples.capacity();
     }
 
-    Tuple* data() noexcept {
-        return tuples.data();
-    }
-
     void insert(const Tuple& tuple, size_t index) {
         if (index >= tuples.size()) {
             throw std::runtime_error("Out of bounds insert");
@@ -119,10 +119,49 @@ public:
         return true;
     }
 
-    void clear_directory() {
-        for (size_t i = 0; i < directory.size(); i++) {
-            directory[i] = pack_entry(0, 0);
+    // Create the directory for the tuples already inserted
+    void create_directory() {
+        if (bucket_cnt == 0) {
+            return;
         }
+
+        // Sort the tuples based on hash (not key)
+        std::sort(tuples.begin(), tuples.end(), [](const Tuple& t1, const Tuple& t2) { return t1.hash < t2.hash; });
+
+        // Step 1: compute hash for every tuple
+        std::vector<uint64_t> hashes(tuple_count);
+        for (size_t i = 0; i < tuple_count; i++) {
+            hashes[i] = tuples[i].hash;
+        }
+
+        // Step 2: count tuples per bucket
+        std::vector<size_t> count(bucket_cnt, 0);
+        for (size_t i = 0; i < tuple_count; i++) {
+            size_t bucket_idx = bucket_index_from_hash(hashes[i]);
+            count[bucket_idx]++;
+        }
+
+        // Step 3: prefix sum → start offsets
+        std::vector<size_t> start(bucket_cnt + 1, 0);
+        for (size_t i = 0; i < bucket_cnt; i++) {
+            start[i + 1] = start[i] + count[i];
+        }
+
+        // Step 4: Set filters
+        std::vector<uint16_t> filters(bucket_cnt, 0);
+        for (size_t i = 0; i < tuple_count; i++) {
+            size_t bucket_idx = bucket_index_from_hash(hashes[i]);
+            uint16_t slot = uint32_t(hashes[i]) >> (32 - 11);
+            uint16_t tag = tags[slot];
+            filters[bucket_idx] |= tag;
+        }
+
+        // Step 5: write directory
+        for (size_t bucket_idx = 0; bucket_idx < bucket_cnt; bucket_idx++) {
+            directory[bucket_idx] = pack_entry(start[bucket_idx], filters[bucket_idx]);
+        }
+
+        directory[bucket_cnt] = pack_entry(start[bucket_cnt], 0);
     }
 
     void count_and_tag(const Tuple& tuple) {
