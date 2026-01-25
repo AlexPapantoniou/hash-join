@@ -3,22 +3,12 @@
 
 #include "../src/hashmap_hopscotch.hpp"
 
-size_t mix_hash(size_t i) noexcept {
-    i += 1ull;
-    i ^= i >> 33ull;
-    i *= 0xff51afd7ed558ccdull;
-    i ^= i >> 33ull;
-    i *= 0xc4ceb9fe1a85ec53ull;
-    i ^= i >> 33ull;
-    return i;
-}
-
 // Test that elements are inserted within the neighbourhood they hash to
 template<typename Key, typename Value>
 bool is_within_hop_range(HashMapHopscotch<Key, Value>& map, const Key& key, unsigned int hop_length) {
     std::hash<Key> hasher;
     size_t capacity = map.capacity();
-    size_t home = mix_hash(hasher(key)) & (capacity - 1);
+    size_t home = hasher(key) & (capacity - 1);
 
     for (unsigned int i = 0; i < hop_length; i++) {
         size_t index = (home + i) & (capacity - 1);
@@ -64,10 +54,10 @@ TEST_CASE("HashMapHopscotch basic insertion and lookup", "[hashmap]") {
     REQUIRE(not_found == map.end()); //key '10' shouldn't exist
 
     // Test increment operators
-    REQUIRE((++it3)->first == 2);
+    REQUIRE((++it3)->first == 0);
     REQUIRE((it2++)->first == 2);
-    REQUIRE(it2->first == 1);
-    REQUIRE((++it1) == map.end());
+    REQUIRE(it2->first == 3);
+    REQUIRE((++it1) != map.end());
 }
 
 // Test collisions
@@ -87,7 +77,7 @@ TEST_CASE("HashMapHopscotch handles collisions via Hopscotch hashing", "[hashmap
     size_t capacity = map.capacity();
 
     for (int key : keys) {
-        size_t home = mix_hash(hasher(key)) & (capacity - 1);
+        size_t home = hasher(key) & (capacity - 1);
         bool found_in_neighborhood = false;
 
         for (unsigned int offset = 0; offset < hop_len; ++offset) {

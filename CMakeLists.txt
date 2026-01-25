@@ -101,27 +101,27 @@ add_executable(slab_allocator_tests tests/slab_allocator_tests.cpp)
 
 #compile execute.cpp with each algorithm
 add_custom_target(robinhood
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=robinhood -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}  # ensures fast runs in source dir
 )
 
 add_custom_target(hopscotch
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=hopscotch -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_custom_target(cuckoo
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=cuckoo -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_custom_target(unordered
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unordered -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_custom_target(unchained
-    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unchained -Wno-dev
+    COMMAND cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
