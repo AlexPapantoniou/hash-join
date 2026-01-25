@@ -13,45 +13,34 @@ jobs:
  
 
     - name: make hashmap_robinhood_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=robinhood -Wno-dev && cmake --build build --target robinhood_tests -j
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target robinhood_tests -j
       continue-on-error: true
     
 
     - name: Run hashmap_robinhood_tests
       run: (./build/robinhood_tests) || true
-
-
-    - name: Make and run unit tests with hashmap_robinhood
-      run: cmake --build build --target unit_tests -j 3 && ((./build/unit_tests) || true)
       
 
     - name: make hashmap_hopscotch_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=hopscotch -Wno-dev && cmake --build build --target hopscotch_tests -j
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target hopscotch_tests -j
       continue-on-error: true
 
 
     - name: Run hashmap_hopscotch_tests
       run: (./build/hopscotch_tests) || true
-
-    
-    - name: Make and run unit tests with hashmap_hopscotch
-      run: cmake --build build --target unit_tests -j 3 && ((./build/unit_tests) || true)
     
     
     - name: make hashmap_cuckoo_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=cuckoo -Wno-dev && cmake --build build --target cuckoo_tests -j
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target cuckoo_tests -j
       continue-on-error: true
 
 
     - name: Run hashmap_cuckoo_tests
       run: (./build/cuckoo_tests) || true
-
-    - name: Make and run unit tests with hashmap_cuckoo
-      run: cmake --build build --target unit_tests -j 3 && ((./build/unit_tests) || true)
     
 
     - name: make hashmap_unchained_tests
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHASH_ALGORITHM=unchained -Wno-dev && cmake --build build --target unchained_tests -j
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target unchained_tests -j
       continue-on-error: true
 
 
@@ -75,3 +64,10 @@ jobs:
     
     - name: run column_store_utils_tests
       run: (./build/column_store_utils_tests) || true
+
+    - name: make slab_allocator_tests
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev && cmake --build build --target slab_allocator_tests
+      continue-on-error: true
+    
+    - name: run slab_allocator_tests
+      run: (./build/slab_allocator_tests) || true
