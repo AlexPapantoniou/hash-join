@@ -56,17 +56,6 @@ private:
         }
     }
 
-    // Mix the hash value to improve distribution
-    size_t mix_hash(size_t i) noexcept {
-        i += 1ull;
-        i ^= i >> 33ull;
-        i *= 0xff51afd7ed558ccdull;
-        i ^= i >> 33ull;
-        i *= 0xc4ceb9fe1a85ec53ull;
-        i ^= i >> 33ull;
-        return i;
-    }
-
 public:
     // Helper iterator class for similar functionality as std::unordered_map
     class iterator {
@@ -176,7 +165,7 @@ public:
         }
 
         const size_t cap_mask = mask();
-        size_t index = mix_hash(hasher(key)) & cap_mask;
+        size_t index = hasher(key) & cap_mask;
 
         // Check if the neighborhood is full
         uint64_t neighborhood_mask = (neighbours >= 64) ? UINT64_MAX : ((1ull << neighbours) - 1);
@@ -234,7 +223,7 @@ public:
 
     iterator find(const Key& key) {
         const size_t cap_mask = mask();
-        size_t index = mix_hash(hasher(key)) & cap_mask;
+        size_t index = hasher(key) & cap_mask;
         uint64_t hop = hop_info[index];
 
         // Check each neighbor in the hop information
